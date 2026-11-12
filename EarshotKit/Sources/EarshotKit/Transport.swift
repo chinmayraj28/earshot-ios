@@ -40,7 +40,19 @@ public protocol Transport: AnyObject {
     func respondToInvitation(from peer: PeerToken, accept: Bool)
     func send(_ data: Data, to peer: PeerToken) throws
     /// Closes the link locally. Does not produce a `.disconnected` event on this side.
+    /// The radio may still reconnect to this phone later by itself; use `forget` to stop that.
     func disconnect(_ peer: PeerToken)
+    /// Stops reconnecting to this phone by itself (for example when it is blocked or its
+    /// contact removed). Does not close a link; call `disconnect` for that.
+    func forget(_ peer: PeerToken)
+    /// Forgets every phone the radio would reconnect to by itself (when everything is erased).
+    func forgetAllPeers()
+}
+
+extension Transport {
+    /// Radios that never reconnect by themselves have nothing to forget.
+    public func forget(_ peer: PeerToken) {}
+    public func forgetAllPeers() {}
 }
 
 public enum TransportError: Error {

@@ -1,6 +1,9 @@
 @preconcurrency import CoreBluetooth
 import Foundation
 import os
+#if os(iOS)
+import UIKit
+#endif
 
 /// The radio layer used on real iPhones, built on Bluetooth Low Energy (Core Bluetooth).
 ///
@@ -16,6 +19,10 @@ import os
 ///   the link survives both apps going to the background while the phones stay in range.
 /// - If the person swipes the app away, or restarts the phone, nothing runs until they
 ///   open Earshot again.
+/// - A phone we have linked with is never given up on: when its connection drops we ask
+///   iOS to connect again and leave that request waiting, with no time limit. iOS completes
+///   it whenever the two phones are back in range, even with both apps in the background
+///   (see `ReconnectPolicy`). Phones we only saw nearby still get one short attempt.
 ///
 /// How the link works: every phone both announces a small service ("peripheral" role)
 /// and looks for that service on others ("central" role). The side that connects reads
@@ -36,6 +43,8 @@ public final class BluetoothTransport: NSObject, Transport {
     static let rescanInterval: TimeInterval = 30
     static let failurePause: TimeInterval = 60
     static let duplicatePause: TimeInterval = 600
+    /// How often the signal strength of linked phones is read while the app is on screen.
+    static let signalInterval: TimeInterval = 10
 
     public var eventHandler: ((TransportEvent) -> Void)?
 
@@ -56,6 +65,10 @@ public final class BluetoothTransport: NSObject, Transport {
         var inbox: CBCharacteristic?
         var writeQueue: [Data] = []
         var isWriting = false
+        /// Bytes in `writeQueue` (see `OutgoingBudget`).
+        var queued = OutgoingBudget()
+        /// The last chunk written was a "more follows" one.
+        var writeMidFrame = false
         var fromPeripheral = BluetoothWire.Reassembler()
 
         // Their connection to us.
@@ -88,7 +101,23 @@ public final class BluetoothTransport: NSObject, Transport {
     private var tokensByCentral: [UUID: PeerToken] = [:]
     /// Phones we are connecting to but whose beacon has not been read yet.
     private var connecting: [UUID: CBPeripheral] = [:]
-    /// Connections handed back by iOS after it relaunched the app; closed on start.
+    /// Remembered phones that are out of reach, each with one connect request left
+    /// waiting (ours, or iOS's own automatic reconnect). Never more than one per phone.
+    private var pending: [UUID: CBPeripheral] = [:]
+    /// Which phones are worth waiting for. Survives `stop` (and so a Bluetooth restart),
+    /// but not the end of the process; nothing is written to disk.
+    private var reconnect = ReconnectPolicy()
+    /// The beacon nonce last read from each remembered address. When the same nonce shows
+    /// up under a new address (iPhones change their Bluetooth address every few minutes),
+    /// the old address will not come back, so its waiting request is withdrawn.
+    private var nonceByAddress: [UUID: Data] = [:]
+    /// Remembered phones in back-off after quick failures: no new request before this time,
+    /// even if a scan sees them.
+    private var retryAt: [UUID: Date] = [:]
+    private var linkLog = LinkEventLog()
+    private var linkEventListeners: [UUID: AsyncStream<LinkEvent>.Continuation] = [:]
+    /// Connections handed back by iOS after it relaunched the app; sorted out once
+    /// Bluetooth is on (see `readopt`).
     private var restoredPeripherals: [CBPeripheral] = []
     /// Bluetooth addresses not worth connecting to again for a while: a second address
     /// of a phone we already hold, or one that failed. Maps to the time the pause ends.
@@ -103,6 +132,10 @@ public final class BluetoothTransport: NSObject, Transport {
     private var subscribers: [UUID: CBCentral] = [:]
     private var inbound: [UUID: BluetoothWire.Reassembler] = [:]
     private var notifyQueue: [(chunk: Data, central: CBCentral)] = []
+    /// Bytes in `notifyQueue` per phone, and whether the last chunk sent to it was a
+    /// "more follows" one (see `OutgoingBudget`).
+    private var notifyBudgets: [UUID: OutgoingBudget] = [:]
+    private var notifyMidFrame: [UUID: Bool] = [:]
 
     public override init() { super.init() }
 
@@ -133,6 +166,7 @@ public final class BluetoothTransport: NSObject, Transport {
         }
         if peripheralManager?.state == .poweredOn { publish() }
         rescanPeriodically()
+        sampleSignalPeriodically()
     }
 
     /// A scan reports each phone once, so it is restarted now and then to pick up phones
@@ -150,7 +184,9 @@ public final class BluetoothTransport: NSObject, Transport {
         cancelled = cancelled.filter { $0.value.timeIntervalSinceNow > -5 }
         if let central, central.state == .poweredOn {
             central.stopScan()
-            for peripheral in Array(connecting.values) + remotes.values.compactMap(\.peripheral) {
+            // Waiting requests are cancelled too; `reconnect` still remembers the phones, so
+            // the next `start` (for example once Bluetooth is back on) asks again.
+            for peripheral in Array(connecting.values) + Array(pending.values) + remotes.values.compactMap(\.peripheral) {
                 peripheral.delegate = nil
                 cancelled[peripheral.identifier] = Date()
                 central.cancelPeripheralConnection(peripheral)
@@ -202,6 +238,7 @@ public final class BluetoothTransport: NSObject, Transport {
             write(BluetoothWire.frame(.close), to: remote)
         }
         remote.route = .asPeripheral
+        linkOpened(remote)
         notify(BluetoothWire.frame(.accept), to: subscriber)
         emitLater(.connected(peer))
     }
@@ -209,24 +246,93 @@ public final class BluetoothTransport: NSObject, Transport {
     public func send(_ data: Data, to peer: PeerToken) throws {
         guard let remote = remotes[peer], let route = remote.route else { throw TransportError.notConnected }
         let frame = BluetoothWire.frame(.data, data)
+        let accepted: Bool
         switch route {
         case .asCentral:
             guard remote.peripheral != nil, remote.inbox != nil else { throw TransportError.notConnected }
-            write(frame, to: remote)
+            accepted = write(frame, to: remote, limited: true)
         case .asPeripheral:
             guard let subscriber = remote.subscriber else { throw TransportError.notConnected }
-            notify(frame, to: subscriber)
+            accepted = notify(frame, to: subscriber, limited: true)
         }
+        guard accepted else {
+            shedLoad(remote)
+            throw TransportError.notConnected
+        }
+    }
+
+    /// More than `OutgoingBudget.limit` bytes are waiting for this phone: the engine is
+    /// sending far faster than Bluetooth can carry, which honest use never does. Rather
+    /// than grow without bound, or drop frames in the middle of a stream, the link is
+    /// closed: the frame already on its way is finished, everything after it is dropped,
+    /// "close" is sent, and the engine gets `.disconnected` (and re-handshakes later as
+    /// after any drop). The Bluetooth connection itself stays.
+    private func shedLoad(_ remote: Remote) {
+        log("send queue over \(OutgoingBudget.limit) bytes, closing the link to \(remote.token.rawValue)")
+        switch remote.route {
+        case .asCentral:
+            let keep = OutgoingBudget.chunksFinishingCurrentFrame(remote.writeQueue, midFrame: remote.writeMidFrame)
+            remote.writeQueue.removeSubrange(keep...)
+            remote.queued.reset(to: remote.writeQueue.reduce(0) { $0 + $1.count })
+        case .asPeripheral:
+            guard let id = remote.subscriber?.identifier else { break }
+            let mine = notifyQueue.filter { $0.central.identifier == id }.map(\.chunk)
+            let keep = OutgoingBudget.chunksFinishingCurrentFrame(mine, midFrame: notifyMidFrame[id] ?? false)
+            var seen = 0
+            notifyQueue.removeAll { entry in
+                guard entry.central.identifier == id else { return false }
+                seen += 1
+                return seen > keep
+            }
+            notifyBudgets[id] = OutgoingBudget()
+            notifyBudgets[id]?.reset(to: mine.prefix(keep).reduce(0) { $0 + $1.count })
+        case nil:
+            break
+        }
+        closeRoute(of: remote)
+        emitLater(.disconnected(remote.token))
     }
 
     public func disconnect(_ peer: PeerToken) {
         guard let remote = remotes[peer] else { return }
+        // Only the engine link ends. The engine also does this after errors (a slow
+        // handshake, a protocol slip), so the phone stays remembered: when its Bluetooth
+        // connection later drops, a request is left waiting as usual. `forget` is the way
+        // to stop that.
         closeRoute(of: remote)
         if remote.outgoingInvite != nil {
             remote.outgoingInvite = nil
             write(BluetoothWire.frame(.close), to: remote)
         }
         // An invitation from them that is still waiting for an answer is left alone.
+    }
+
+    /// Stops waiting for this phone: every address it has used is forgotten and any waiting
+    /// request withdrawn. A connection that is open stays open, like the one to any other
+    /// nearby phone: it shows the phone in "Find nearby", costs no radio time while idle,
+    /// and is let go when a slot is needed (`freeSlotIfPossible`). Closing it would only
+    /// make the next scan connect again a minute later.
+    public func forget(_ peer: PeerToken) {
+        guard let remote = remotes[peer] else { return }
+        let addresses = LinkTriage.addresses(of: remote.peripheral?.identifier, nonce: remote.nonce,
+                                             nonceByAddress: nonceByAddress)
+        for id in addresses {
+            reconnect.forget(id)
+            nonceByAddress[id] = nil
+            retryAt[id] = nil
+            stopWaiting(for: id)
+        }
+        log("forgot a phone (\(addresses.count) address(es))")
+    }
+
+    /// Forgets every remembered phone and clears the link diagnostics (used when everything
+    /// on this phone is erased).
+    public func forgetAllPeers() {
+        Array(pending.keys).forEach(stopWaiting)
+        reconnect.forgetAll()
+        nonceByAddress.removeAll()
+        retryAt.removeAll()
+        linkLog.removeAll()
     }
 
     // MARK: Shared helpers
@@ -283,10 +389,14 @@ public final class BluetoothTransport: NSObject, Transport {
         tokensByPeripheral.removeAll()
         tokensByCentral.removeAll()
         connecting.removeAll()
+        pending.removeAll()
+        retryAt.removeAll()
         ignored.removeAll()
         subscribers.removeAll()
         inbound.removeAll()
         notifyQueue.removeAll()
+        notifyBudgets.removeAll()
+        notifyMidFrame.removeAll()
         outbox = nil
         publishedService = nil
     }
@@ -303,6 +413,7 @@ public final class BluetoothTransport: NSObject, Transport {
     private func closeRoute(of remote: Remote) {
         guard let route = remote.route else { return }
         remote.route = nil
+        record(.linkDown, peer: label(of: remote))
         switch route {
         case .asCentral: write(BluetoothWire.frame(.close), to: remote)
         case .asPeripheral:
@@ -318,22 +429,205 @@ public final class BluetoothTransport: NSObject, Transport {
         emit(.unavailable(problem))
     }
 
+    // MARK: Link diagnostics
+
+    /// The newest link events (at most 500), oldest first. Memory only; see `LinkEvent`.
+    public func diagnostics() -> [LinkEvent] { linkLog.events }
+
+    /// Every link event from now on, as it happens. The stream ends when the caller stops
+    /// iterating it. It keeps up to 500 events a slow reader has not taken yet.
+    public func linkEvents() -> AsyncStream<LinkEvent> {
+        let (stream, continuation) = AsyncStream.makeStream(of: LinkEvent.self,
+                                                            bufferingPolicy: .bufferingNewest(LinkEventLog.defaultCapacity))
+        let id = UUID()
+        linkEventListeners[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { @MainActor in self?.linkEventListeners[id] = nil }
+        }
+        return stream
+    }
+
+    public func clearDiagnostics() { linkLog.removeAll() }
+
+    private func record(_ kind: LinkEvent.Kind, peer: String, rssi: Int? = nil) {
+        let event = LinkEvent(date: Date(), kind: kind, peer: peer, rssi: rssi, appState: appState)
+        linkLog.append(event)
+        for listener in linkEventListeners.values { listener.yield(event) }
+    }
+
+    private var appState: LinkEvent.AppState {
+        #if os(iOS)
+        UIApplication.shared.applicationState == .background ? .background : .foreground
+        #else
+        .foreground
+        #endif
+    }
+
+    private func label(of remote: Remote) -> String {
+        if let id = remote.peripheral?.identifier ?? remote.subscriber?.identifier { return LinkEvent.label(for: id) }
+        return remote.token.rawValue
+    }
+
+    /// Reads the signal strength of every linked phone now and then, only while Earshot
+    /// is on screen (it costs a little radio time and is only useful for measuring range).
+    private func sampleSignalPeriodically() {
+        after(Self.signalInterval) { transport in
+            if transport.appState == .foreground {
+                for remote in transport.remotes.values where remote.route != nil {
+                    remote.peripheral?.readRSSI()
+                }
+            }
+            transport.sampleSignalPeriodically()
+        }
+    }
+
+    // MARK: Waiting for known phones to come back
+
+    /// Asks iOS to reconnect by itself if the link drops later (iOS 17 / macOS 14, which is
+    /// also this package's minimum, so no availability check is needed).
+    private static var reconnectOptions: [String: Any] {
+        [CBConnectPeripheralOptionEnableAutoReconnect: true]
+    }
+
+    /// The engine opened a link over this phone: remember its Bluetooth address.
+    private func linkOpened(_ remote: Remote) {
+        if let id = remote.peripheral?.identifier {
+            if let evicted = reconnect.linkUp(id) { stopWaiting(for: evicted) }
+            if let nonce = remote.nonce { nonceByAddress[id] = nonce }
+        }
+        record(.linkUp, peer: label(of: remote))
+    }
+
+    /// Leaves one connect request open for a remembered phone, with no time limit.
+    /// `requestConnect` is false when iOS already has one open: its automatic reconnect,
+    /// or a request carried over a relaunch.
+    private func waitForReturn(of peripheral: CBPeripheral, requestConnect: Bool) {
+        let id = peripheral.identifier
+        guard isRunning, let central, central.state == .poweredOn, reconnect.isRemembered(id),
+              pending[id] == nil, connecting[id] == nil, tokensByPeripheral[id] == nil else { return }
+        if let nonce = nonceByAddress[id],
+           tokensByPeripheral.keys.contains(where: { $0 != id && nonceByAddress[$0] == nonce }) {
+            // The same phone is already connected under a newer address; this one is stale.
+            reconnect.forget(id)
+            nonceByAddress[id] = nil
+            return
+        }
+        pending[id] = peripheral
+        // From here a late "disconnected" from an earlier cancel is recognised by `pending`.
+        cancelled[id] = nil
+        ignored[id] = nil
+        peripheral.delegate = self
+        if requestConnect {
+            central.connect(peripheral, options: Self.reconnectOptions)
+            record(.connectRequested, peer: LinkEvent.label(for: id))
+        } else {
+            record(.reconnecting, peer: LinkEvent.label(for: id))
+        }
+        log("waiting for a known phone to come back")
+    }
+
+    private func stopWaiting(for id: UUID) {
+        guard let peripheral = pending.removeValue(forKey: id) else { return }
+        peripheral.delegate = nil
+        guard let central, central.state == .poweredOn else { return }
+        cancelled[id] = Date()
+        central.cancelPeripheralConnection(peripheral)
+    }
+
+    private func apply(_ decision: ReconnectPolicy.Decision, to peripheral: CBPeripheral, afterCancel: Bool) {
+        switch decision {
+        case .giveUp:
+            break
+        case .waitForSystem:
+            waitForReturn(of: peripheral, requestConnect: false)
+        case .connect(let delay):
+            // Right after a cancel, give iOS a moment to finish it before asking again.
+            let delay = afterCancel ? max(delay, 1) : delay
+            let id = peripheral.identifier
+            if delay <= 0 {
+                waitForReturn(of: peripheral, requestConnect: true)
+            } else {
+                retryAt[id] = Date().addingTimeInterval(delay)
+                after(delay) { transport in
+                    transport.retryAt[id] = nil
+                    transport.waitForReturn(of: peripheral, requestConnect: true)
+                }
+            }
+        }
+    }
+
+    /// The phone that uses `nonce` is now connected at `id`. Any other remembered address
+    /// with the same nonce belongs to the same phone and is stale.
+    private func retireOldAddresses(of nonce: Data, now id: UUID) {
+        nonceByAddress = nonceByAddress.filter { reconnect.isRemembered($0.key) }
+        for (other, otherNonce) in nonceByAddress where other != id && otherNonce == nonce
+            && connecting[other] == nil && tokensByPeripheral[other] == nil {
+            stopWaiting(for: other)
+            reconnect.forget(other)
+            nonceByAddress[other] = nil
+            log("a known phone came back under a new address")
+        }
+        nonceByAddress[id] = nonce
+    }
+
+    /// Bluetooth is (back) on: a waiting request for every remembered phone that has none.
+    private func resumeRemembered() {
+        guard isRunning, let central, central.state == .poweredOn else { return }
+        let missing = reconnect.remembered.filter {
+            pending[$0] == nil && connecting[$0] == nil && tokensByPeripheral[$0] == nil
+        }
+        guard !missing.isEmpty else { return }
+        for peripheral in central.retrievePeripherals(withIdentifiers: missing) {
+            waitForReturn(of: peripheral, requestConnect: true)
+        }
+    }
+
+    /// iOS relaunched the app and handed back the Bluetooth connections it held for us.
+    /// - A request still waiting was left for a phone we had linked with, so it is taken
+    ///   over as it is, not asked for a second time.
+    /// - An open connection is closed: the session keys that went with it died with the
+    ///   old process. It is replaced by a waiting request, so the two phones link up again
+    ///   from scratch as soon as iOS reconnects (normally within a second or two).
+    ///
+    /// Nothing proves that a link ever ran over these (the old process also connected to
+    /// strangers to read their beacons), so they are remembered only provisionally: see
+    /// `ReconnectPolicy`.
+    private func readopt(_ peripheral: CBPeripheral) {
+        guard let central else { return }
+        let id = peripheral.identifier
+        let action = LinkTriage.onRestore(peripheral.state, isRunning: isRunning)
+        guard action != .cancel, reconnect.rememberProvisionally(id) != id else {
+            return central.cancelPeripheralConnection(peripheral)
+        }
+        switch action {
+        case .takeOver:
+            waitForReturn(of: peripheral, requestConnect: false)
+        case .reopen:
+            cancelled[id] = Date()
+            central.cancelPeripheralConnection(peripheral)
+            apply(.connect(after: 0), to: peripheral, afterCancel: true)
+        case .cancel:
+            break
+        }
+    }
+
     // MARK: Central role (we connect to them)
 
     private func centralStateChanged(_ state: CBManagerState) {
         log("central state \(state.rawValue)")
         switch state {
         case .poweredOn:
-            guard let central else { return }
-            restoredPeripherals.forEach(central.cancelPeripheralConnection)
+            let restored = restoredPeripherals
             restoredPeripherals.removeAll()
+            restored.forEach(readopt)
             guard isRunning else { return }
             if reportedProblem != nil {
                 reportedProblem = nil
                 // The engine restarts the transport in response, which begins scanning.
                 emit(.ready)
             }
-            if isRunning { scan() }
+            scan()
+            resumeRemembered()
         case .poweredOff: report(.bluetoothOff)
         case .unauthorized: report(.bluetoothDenied)
         case .unsupported: report(.bluetoothUnsupported)
@@ -363,11 +657,22 @@ public final class BluetoothTransport: NSObject, Transport {
                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
-    private func write(_ frame: Data, to remote: Remote) {
-        guard let peripheral = remote.peripheral else { return }
+    /// Queues a frame for a phone we connected to. With `limited`, refuses it (returns
+    /// false) when the queue would go over `OutgoingBudget.limit`; control frames always go.
+    @discardableResult
+    private func write(_ frame: Data, to remote: Remote, limited: Bool = false) -> Bool {
+        guard let peripheral = remote.peripheral else { return false }
         let length = max(peripheral.maximumWriteValueLength(for: .withoutResponse), 20)
-        remote.writeQueue.append(contentsOf: BluetoothWire.chunks(of: frame, maxChunkLength: length))
+        let chunks = BluetoothWire.chunks(of: frame, maxChunkLength: length)
+        let size = chunks.reduce(0) { $0 + $1.count }
+        if limited {
+            guard remote.queued.admit(size) else { return false }
+        } else {
+            remote.queued.force(size)
+        }
+        remote.writeQueue.append(contentsOf: chunks)
         pumpWrites(remote)
+        return true
     }
 
     /// One chunk at a time, each confirmed by the other phone before the next goes out.
@@ -375,23 +680,38 @@ public final class BluetoothTransport: NSObject, Transport {
         guard !remote.isWriting, !remote.writeQueue.isEmpty,
               let peripheral = remote.peripheral, let inbox = remote.inbox else { return }
         remote.isWriting = true
-        peripheral.writeValue(remote.writeQueue.removeFirst(), for: inbox, type: .withResponse)
+        let chunk = remote.writeQueue.removeFirst()
+        remote.queued.sent(chunk.count)
+        remote.writeMidFrame = chunk.first == 0
+        peripheral.writeValue(chunk, for: inbox, type: .withResponse)
     }
 
-    /// Our connection to a phone is gone (or unusable).
-    private func dropPeripheral(_ peripheral: CBPeripheral, cancel: Bool, pause: TimeInterval? = nil) {
+    /// Our connection to a phone is gone (or unusable). `ending` says why, which decides
+    /// whether a connect request is left waiting for it (see `ReconnectPolicy`).
+    private func dropPeripheral(_ peripheral: CBPeripheral, cancel: Bool, pause: TimeInterval? = nil,
+                                ending: ReconnectPolicy.Ending) {
         let id = peripheral.identifier
         peripheral.delegate = nil
         if let pause { ignored[id] = Date().addingTimeInterval(pause) }
-        if cancel, let central, central.state == .poweredOn { central.cancelPeripheralConnection(peripheral) }
+        if cancel, let central, central.state == .poweredOn {
+            // Its "disconnected" callback is expected and must not count as a second drop.
+            cancelled[id] = Date()
+            central.cancelPeripheralConnection(peripheral)
+        }
+        let wasPending = pending.removeValue(forKey: id) != nil
         let wasKnown = connecting.removeValue(forKey: id) != nil || tokensByPeripheral[id] != nil
         if let token = tokensByPeripheral.removeValue(forKey: id), let remote = remotes[token] {
             let hadLink = remote.route == .asCentral || remote.outgoingInvite != nil
-            if remote.route == .asCentral { remote.route = nil }
+            if remote.route == .asCentral {
+                remote.route = nil
+                record(.linkDown, peer: LinkEvent.label(for: id))
+            }
             remote.outgoingInvite = nil
             remote.peripheral = nil
             remote.inbox = nil
             remote.writeQueue.removeAll()
+            remote.queued.reset()
+            remote.writeMidFrame = false
             remote.isWriting = false
             remote.fromPeripheral.reset()
             if remote.subscriber == nil { remotes[token] = nil }
@@ -403,6 +723,16 @@ public final class BluetoothTransport: NSObject, Transport {
         }
         // A paused address is not looked for again right away; the periodic rescan does that.
         if wasKnown, pause == nil { scan() }
+        guard wasKnown || wasPending else { return }
+        let decision = reconnect.decide(id, ending)
+        var afterCancel = cancel
+        if ending == .systemReconnecting, case .connect = decision, let central, central.state == .poweredOn {
+            // Too many quick drops in a row: stop iOS's immediate reconnect and wait out the back-off.
+            cancelled[id] = Date()
+            central.cancelPeripheralConnection(peripheral)
+            afterCancel = true
+        }
+        apply(decision, to: peripheral, afterCancel: afterCancel)
     }
 
     /// Makes room when every slot is taken, by letting go of the phone that has been
@@ -414,7 +744,7 @@ public final class BluetoothTransport: NSObject, Transport {
         guard let oldest = idle.min(by: { $0.adoptedAt < $1.adoptedAt }), let peripheral = oldest.peripheral else {
             return false
         }
-        dropPeripheral(peripheral, cancel: true, pause: Self.failurePause)
+        dropPeripheral(peripheral, cancel: true, pause: Self.failurePause, ending: .dropped)
         return true
     }
 
@@ -427,7 +757,7 @@ public final class BluetoothTransport: NSObject, Transport {
             // The same phone seen under a new Bluetooth address while the old connection
             // still works. Keep the old one.
             connecting[id] = peripheral
-            dropPeripheral(peripheral, cancel: true, pause: Self.duplicatePause)
+            dropPeripheral(peripheral, cancel: true, pause: Self.duplicatePause, ending: .dropped)
             return
         }
         // If this phone already connected to us and named this nonce, it is one and the same.
@@ -436,6 +766,17 @@ public final class BluetoothTransport: NSObject, Transport {
         remote.inbox = inbox
         remote.adoptedAt = Date()
         tokensByPeripheral[id] = remote.token
+        retireOldAddresses(of: found.nonce, now: id)
+        if reconnect.isRemembered(id) {
+            reconnect.cameBack(id)
+            // If the engine does not open a link over it soon (the contact was removed, or
+            // blocked, while away), stop waiting for this phone the next time it leaves.
+            after(ReconnectPolicy.unusedGrace + 1) { transport in
+                if transport.reconnect.isUnused(id) { transport.reconnect.forget(id) }
+            }
+        }
+        // Joined to a link that already runs the other way round.
+        if remote.route != nil { linkOpened(remote) }
         log("beacon read, found \(remote.token.rawValue)")
         emit(.found(remote.token, found))
     }
@@ -448,6 +789,7 @@ public final class BluetoothTransport: NSObject, Transport {
             guard remote.outgoingInvite != nil else { return }
             remote.outgoingInvite = nil
             remote.route = .asCentral
+            linkOpened(remote)
             log("invitation accepted by \(token.rawValue)")
             emit(.connected(token))
         case .decline:
@@ -460,6 +802,7 @@ public final class BluetoothTransport: NSObject, Transport {
         case .close:
             guard remote.route == .asCentral else { return }
             remote.route = nil
+            record(.linkDown, peer: label(of: remote))
             emit(.disconnected(token))
         case .invite:
             break
@@ -484,12 +827,21 @@ public final class BluetoothTransport: NSObject, Transport {
         peripheralManager.add(service)
     }
 
-    private func notify(_ frame: Data, to central: CBCentral) {
+    /// Queues a frame for a phone connected to us. `limited` works as in `write`.
+    @discardableResult
+    private func notify(_ frame: Data, to central: CBCentral, limited: Bool = false) -> Bool {
         let length = max(central.maximumUpdateValueLength, 20)
-        for chunk in BluetoothWire.chunks(of: frame, maxChunkLength: length) {
-            notifyQueue.append((chunk, central))
+        let chunks = BluetoothWire.chunks(of: frame, maxChunkLength: length)
+        let size = chunks.reduce(0) { $0 + $1.count }
+        let id = central.identifier
+        if limited {
+            guard notifyBudgets[id, default: OutgoingBudget()].admit(size) else { return false }
+        } else {
+            notifyBudgets[id, default: OutgoingBudget()].force(size)
         }
+        for chunk in chunks { notifyQueue.append((chunk, central)) }
         flushNotifications()
+        return true
     }
 
     private func flushNotifications() {
@@ -497,11 +849,14 @@ public final class BluetoothTransport: NSObject, Transport {
         while let next = notifyQueue.first {
             guard subscribers[next.central.identifier] != nil else {
                 notifyQueue.removeFirst()
+                notifyBudgets[next.central.identifier]?.sent(next.chunk.count)
                 continue
             }
             // `false` means the system's queue is full; it calls back when there is room.
             guard peripheralManager.updateValue(next.chunk, for: outbox, onSubscribedCentrals: [next.central]) else { return }
             notifyQueue.removeFirst()
+            notifyBudgets[next.central.identifier]?.sent(next.chunk.count)
+            notifyMidFrame[next.central.identifier] = next.chunk.first == 0
         }
     }
 
@@ -510,9 +865,14 @@ public final class BluetoothTransport: NSObject, Transport {
         subscribers[id] = nil
         inbound[id] = nil
         notifyQueue.removeAll { $0.central.identifier == id }
+        notifyBudgets[id] = nil
+        notifyMidFrame[id] = nil
         guard let token = tokensByCentral.removeValue(forKey: id), let remote = remotes[token] else { return }
         let hadLink = remote.route == .asPeripheral
-        if hadLink { remote.route = nil }
+        if hadLink {
+            remote.route = nil
+            record(.linkDown, peer: LinkEvent.label(for: id))
+        }
         remote.hasIncomingInvite = false
         remote.subscriber = nil
         if remote.peripheral == nil { remotes[token] = nil }
@@ -547,6 +907,7 @@ public final class BluetoothTransport: NSObject, Transport {
             guard let known else { return }
             if known.route == .asPeripheral {
                 known.route = nil
+                record(.linkDown, peer: label(of: known))
                 emit(.disconnected(known.token))
             } else {
                 // They withdrew an invitation that was still waiting for an answer.
@@ -567,8 +928,8 @@ extension BluetoothTransport: @preconcurrency CBCentralManagerDelegate {
 
     #if os(iOS)
     public func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
-        // The app was relaunched by iOS. Session keys lived in memory and are gone, so
-        // old connections are closed and both phones link up again from scratch.
+        // The app was relaunched by iOS. Session keys lived in memory and are gone; what
+        // happens to each connection is decided once Bluetooth is on (see `readopt`).
         restoredPeripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] ?? []
     }
     #endif
@@ -576,7 +937,15 @@ extension BluetoothTransport: @preconcurrency CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let id = peripheral.identifier
-        guard isRunning, connecting[id] == nil, tokensByPeripheral[id] == nil else { return }
+        guard isRunning, connecting[id] == nil, tokensByPeripheral[id] == nil, pending[id] == nil else { return }
+        // 127 means "not available" in Core Bluetooth.
+        record(.discovered, peer: LinkEvent.label(for: id), rssi: RSSI.intValue == 127 ? nil : RSSI.intValue)
+        if reconnect.isRemembered(id) {
+            // A phone we linked with before: no pause, no slot limit, no time limit,
+            // but a back-off after quick failures is respected.
+            if let until = retryAt[id], until > Date() { return }
+            return waitForReturn(of: peripheral, requestConnect: true)
+        }
         if let until = ignored[id] {
             guard until < Date() else { return }
             ignored[id] = nil
@@ -585,28 +954,79 @@ extension BluetoothTransport: @preconcurrency CBCentralManagerDelegate {
         connecting[id] = peripheral
         log("discovered a phone, connecting (signal \(RSSI))")
         peripheral.delegate = self
+        // A first connection to a phone we never linked with gets no automatic reconnect
+        // and a time limit: strangers are not chased.
         central.connect(peripheral)
+        record(.connectRequested, peer: LinkEvent.label(for: id))
+        watchSetup(of: peripheral)
+    }
+
+    /// Gives up on a connection that is not ready (beacon read) within `connectTimeout`.
+    private func watchSetup(of peripheral: CBPeripheral) {
+        let id = peripheral.identifier
         after(Self.connectTimeout) { transport in
-            guard let pending = transport.connecting[id], pending === peripheral else { return }
-            transport.dropPeripheral(peripheral, cancel: true, pause: Self.failurePause)
+            guard let current = transport.connecting[id], current === peripheral else { return }
+            transport.record(.connectFailed, peer: LinkEvent.label(for: id))
+            transport.dropPeripheral(peripheral, cancel: true, pause: Self.failurePause, ending: .setupFailed)
         }
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard connecting[peripheral.identifier] === peripheral else { return }
+        let id = peripheral.identifier
+        if pending.removeValue(forKey: id) != nil {
+            // A phone we were waiting for is back. Reading its beacon gets the usual time limit.
+            connecting[id] = peripheral
+            peripheral.delegate = self
+            watchSetup(of: peripheral)
+        }
+        guard connecting[id] === peripheral else { return }
         log("connected, reading beacon")
+        record(.connected, peer: LinkEvent.label(for: id))
+        peripheral.readRSSI()
         peripheral.discoverServices([Self.serviceID])
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         log("failed to connect: \(error?.localizedDescription ?? "-")")
-        dropPeripheral(peripheral, cancel: false, pause: Self.failurePause)
+        record(.connectFailed, peer: LinkEvent.label(for: peripheral.identifier))
+        dropPeripheral(peripheral, cancel: false, pause: Self.failurePause, ending: .connectFailed)
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        log("disconnected: \(error?.localizedDescription ?? "-")")
-        if let at = cancelled.removeValue(forKey: peripheral.identifier), at.timeIntervalSinceNow > -5 { return }
-        dropPeripheral(peripheral, cancel: false)
+        connectionEnded(peripheral, isReconnecting: false, error: error)
+    }
+
+    /// iOS 17 / macOS 14 variant. With `CBConnectPeripheralOptionEnableAutoReconnect`,
+    /// `isReconnecting` is true when iOS has already started connecting again by itself.
+    public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
+                               timestamp: CFAbsoluteTime, isReconnecting: Bool, error: Error?) {
+        connectionEnded(peripheral, isReconnecting: isReconnecting, error: error)
+    }
+
+    /// Handles both "disconnected" callbacks. Apple does not document whether one or both
+    /// are called when both are implemented, so a second report of the same drop is ignored.
+    private func connectionEnded(_ peripheral: CBPeripheral, isReconnecting: Bool, error: Error?) {
+        let id = peripheral.identifier
+        log("disconnected\(isReconnecting ? " (iOS reconnecting)" : ""): \(error?.localizedDescription ?? "-")")
+        let cancelledRecently = cancelled.removeValue(forKey: id).map { $0.timeIntervalSinceNow > -5 } ?? false
+        // `alreadyWaiting`: the same drop reported twice, or the late callback of a cancel.
+        let action = LinkTriage.onDisconnect(cancelledRecently: cancelledRecently, alreadyWaiting: pending[id] != nil,
+                                             remembered: reconnect.isRemembered(id), isReconnecting: isReconnecting)
+        switch action {
+        case .ignore:
+            return
+        case .cancelSystemReconnectAndDrop:
+            if let central, central.state == .poweredOn {
+                cancelled[id] = Date()
+                central.cancelPeripheralConnection(peripheral)
+            }
+            record(.disconnected, peer: LinkEvent.label(for: id))
+            dropPeripheral(peripheral, cancel: false, ending: .linkLost)
+        case .drop(let ending):
+            record(.disconnected, peer: LinkEvent.label(for: id))
+            // The engine sees the link drop either way, and re-handshakes once it is back.
+            dropPeripheral(peripheral, cancel: false, ending: ending)
+        }
     }
 }
 
@@ -619,7 +1039,7 @@ extension BluetoothTransport: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard isCurrent(peripheral) else { return }
         guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == Self.serviceID }) else {
-            return dropPeripheral(peripheral, cancel: true, pause: Self.failurePause)
+            return dropPeripheral(peripheral, cancel: true, pause: Self.failurePause, ending: .setupFailed)
         }
         peripheral.discoverCharacteristics([Self.beaconID, Self.inboxID, Self.outboxID], for: service)
     }
@@ -630,7 +1050,7 @@ extension BluetoothTransport: @preconcurrency CBPeripheralDelegate {
         guard error == nil, found.contains(where: { $0.uuid == Self.beaconID }),
               found.contains(where: { $0.uuid == Self.inboxID }),
               let outbox = found.first(where: { $0.uuid == Self.outboxID }) else {
-            return dropPeripheral(peripheral, cancel: true, pause: Self.failurePause)
+            return dropPeripheral(peripheral, cancel: true, pause: Self.failurePause, ending: .setupFailed)
         }
         // Listen first, then read who they are.
         peripheral.setNotifyValue(true, for: outbox)
@@ -641,7 +1061,7 @@ extension BluetoothTransport: @preconcurrency CBPeripheralDelegate {
         guard isCurrent(peripheral), characteristic.uuid == Self.outboxID else { return }
         guard error == nil, characteristic.isNotifying,
               let beacon = characteristic.service?.characteristics?.first(where: { $0.uuid == Self.beaconID }) else {
-            return dropPeripheral(peripheral, cancel: true)
+            return dropPeripheral(peripheral, cancel: true, ending: .setupFailed)
         }
         peripheral.readValue(for: beacon)
     }
@@ -652,7 +1072,7 @@ extension BluetoothTransport: @preconcurrency CBPeripheralDelegate {
         case Self.beaconID:
             guard error == nil, let value = characteristic.value, let found = BluetoothWire.parseBeacon(value),
                   let inbox = characteristic.service?.characteristics?.first(where: { $0.uuid == Self.inboxID }) else {
-                return dropPeripheral(peripheral, cancel: true, pause: Self.failurePause)
+                return dropPeripheral(peripheral, cancel: true, pause: Self.failurePause, ending: .setupFailed)
             }
             adopt(peripheral, inbox: inbox, found)
         case Self.outboxID:
@@ -661,7 +1081,7 @@ extension BluetoothTransport: @preconcurrency CBPeripheralDelegate {
             do {
                 if let frame = try remote.fromPeripheral.append(chunk) { frameReceived(frame, fromPeripheralOf: remote) }
             } catch {
-                dropPeripheral(peripheral, cancel: true)
+                dropPeripheral(peripheral, cancel: true, ending: .setupFailed)
             }
         default:
             break
@@ -671,7 +1091,7 @@ extension BluetoothTransport: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         guard isCurrent(peripheral),
               let remote = tokensByPeripheral[peripheral.identifier].flatMap({ remotes[$0] }) else { return }
-        guard error == nil else { return dropPeripheral(peripheral, cancel: true) }
+        guard error == nil else { return dropPeripheral(peripheral, cancel: true, ending: .setupFailed) }
         remote.isWriting = false
         pumpWrites(remote)
     }
@@ -679,7 +1099,13 @@ extension BluetoothTransport: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
         // The other phone restarted Earshot: its old beacon and link are void.
         guard isCurrent(peripheral), invalidatedServices.contains(where: { $0.uuid == Self.serviceID }) else { return }
-        dropPeripheral(peripheral, cancel: true)
+        // Reconnecting (if remembered) reads its new beacon.
+        dropPeripheral(peripheral, cancel: true, ending: .linkLost)
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard error == nil, isCurrent(peripheral), RSSI.intValue != 127 else { return }
+        record(.signal, peer: LinkEvent.label(for: peripheral.identifier), rssi: RSSI.intValue)
     }
 }
 
