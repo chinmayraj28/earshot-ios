@@ -30,7 +30,8 @@ extension Messenger {
     public static func live(radio: Radio = .standard) -> Messenger {
         Messenger(transport: radio.makeTransport(),
                   persistence: FilePersistence(directory: FilePersistence.defaultDirectory()),
-                  identityStore: KeychainIdentityStore())
+                  identityStore: KeychainIdentityStore(),
+                  attachments: AttachmentStore(directory: AttachmentStore.defaultDirectory()))
     }
 
     /// Real radios, but nothing is saved. Used by end-to-end tests so every run starts clean.

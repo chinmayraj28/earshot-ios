@@ -35,6 +35,22 @@ public final class Messenger {
         public var incomingBurst = 60.0
         public var incomingRate = 5.0
 
+        // Photos. See `Messenger+Photos.swift` and `PhotoLimits`.
+        /// A photo being sent fails if the other phone confirms no new piece for this long.
+        /// (Not a fixed total: a big photo on a slow link may take a minute and still succeed.)
+        public var photoStallTimeout: Duration = .seconds(20)
+        /// A photo being received is thrown away if no piece arrives for this long.
+        public var incomingPhotoIdleTimeout: Duration = .seconds(30)
+        /// Photos are refused once stored photos would take more than this.
+        public var photoStorageQuota = 300 * 1024 * 1024
+        /// A link may deliver this many photo bytes in a burst, then `incomingPhotoByteRate` per second.
+        /// Far above what Bluetooth LE can carry; it only stops a flood over faster radios.
+        public var incomingPhotoByteBurst = 2.0 * 1024 * 1024
+        public var incomingPhotoByteRate = 1.0 * 1024 * 1024
+        /// Tests only: behave like Earshot before photos existed. Announces no features and
+        /// closes the link on any photo payload, exactly as an older version's decoder would.
+        var legacyProtocolForTesting = false
+
         public init() {}
     }
 
@@ -49,15 +65,26 @@ public final class Messenger {
     public private(set) var profile: Profile
     public private(set) var availability: Availability = .off
     public private(set) var contacts: [Contact]
-    public private(set) var conversations: [ContactID: Conversation]
+    public internal(set) var conversations: [ContactID: Conversation]
     /// Devices detected nearby, including saved contacts (those have `contactID` set).
     public private(set) var nearbyPeers: [NearbyPeer] = []
     public private(set) var requests: [ConnectionRequest] = []
     public private(set) var linkStates: [ContactID: LinkState] = [:]
+    /// Contacts that are connected right now over a link whose other end announced it can
+    /// receive photos. Only these can be sent a new photo.
+    public internal(set) var photoCapableContacts: Set<ContactID> = []
+    /// How far each photo transfer has got, from 0 to 1, by message ID (sending and receiving).
+    public internal(set) var photoProgress: [UUID: Double] = [:]
+    /// Photos arriving right now, per contact, for drawing placeholders. They become
+    /// ordinary messages once fully received and checked.
+    public internal(set) var incomingPhotos: [ContactID: [IncomingPhoto]] = [:]
+    /// Why a photo was not delivered, when there is something more specific to say. Not saved.
+    public internal(set) var photoFailures: [UUID: PhotoFailure] = [:]
 
     // MARK: Internals
+    // Internal rather than private where `Messenger+Photos.swift` needs them.
 
-    private struct Link {
+    struct Link {
         enum Role { case inviter, invitee }
         enum Phase {
             case connecting
@@ -80,6 +107,11 @@ public final class Messenger {
         /// Allowance for incoming messages; refills over time. Stops a flood from one link.
         var incomingBudget = 0.0
         var budgetUpdated = ContinuousClock.now
+        /// What the other phone announced in its identity proof on this link (`Feature`).
+        var peerFeatures: Set<String> = []
+        /// Allowance for incoming photo bytes, like `incomingBudget`.
+        var photoByteBudget = 0.0
+        var photoBudgetUpdated = ContinuousClock.now
 
         var contactID: ContactID? {
             if case .established(let id) = phase { return id }
@@ -97,7 +129,7 @@ public final class Messenger {
         var foundAt = ContinuousClock.now
     }
 
-    private enum LinkFailure: Error {
+    enum LinkFailure: Error {
         case protocolViolation
         case verificationFailed
         case incompatibleVersion
@@ -108,28 +140,36 @@ public final class Messenger {
 
     @ObservationIgnored public var onEvent: ((Event) -> Void)?
     @ObservationIgnored private let transport: Transport
-    @ObservationIgnored private let persistence: Persistence
+    @ObservationIgnored let persistence: Persistence
+    @ObservationIgnored let attachments: AttachmentStore
     @ObservationIgnored private let identityStore: IdentityStore
-    @ObservationIgnored private let configuration: Configuration
+    @ObservationIgnored let configuration: Configuration
     @ObservationIgnored private var identity: Identity
     /// False when the Keychain could not be read; the identity is then temporary and retried on `start()`.
     @ObservationIgnored private var identityIsStored: Bool
     /// Bumped whenever everything is torn down, so timers from before then do nothing.
     @ObservationIgnored private var epoch = 0
     @ObservationIgnored private var inviteSerials: [PeerToken: Int] = [:]
-    @ObservationIgnored private var links: [PeerToken: Link] = [:]
+    @ObservationIgnored var links: [PeerToken: Link] = [:]
     @ObservationIgnored private var discovered: [PeerToken: Discovered] = [:]
     @ObservationIgnored private var refusedTokens: Set<PeerToken> = []
     @ObservationIgnored private var reconnectAttempts: [ContactID: Int] = [:]
-    @ObservationIgnored private var knownMessageIDs: [ContactID: Set<UUID>] = [:]
+    @ObservationIgnored var knownMessageIDs: [ContactID: Set<UUID>] = [:]
     @ObservationIgnored private var localNonce = Data()
     @ObservationIgnored private var localTag = Data()
-    @ObservationIgnored private var activeConversation: ContactID?
+    @ObservationIgnored var activeConversation: ContactID?
+    /// Photos this phone is sending, by message ID. At most one per link at a time.
+    @ObservationIgnored var outgoingTransfers: [UUID: OutgoingTransfer] = [:]
+    /// Photos this phone is receiving, by message ID.
+    @ObservationIgnored var incomingTransfers: [UUID: IncomingTransfer] = [:]
 
+    /// - Parameter attachments: where photo files are kept. Defaults to memory (tests, demo mode).
     public init(transport: Transport, persistence: Persistence, identityStore: IdentityStore,
+                attachments: AttachmentStore = AttachmentStore(),
                 configuration: Configuration = Configuration()) {
         self.transport = transport
         self.persistence = persistence
+        self.attachments = attachments
         self.identityStore = identityStore
         self.configuration = configuration
 
@@ -148,6 +188,10 @@ public final class Messenger {
                 conversations[id]?.messages[index].status = .waiting
             }
         }
+        // Photo files that no saved message points to are leftovers: a photo half-received
+        // when the app was stopped, or one whose message was deleted just before a crash.
+        let referenced = conversations.values.flatMap(\.messages).compactMap(\.photo?.fileName)
+        attachments.removeAll(except: Set(referenced))
         transport.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
@@ -263,6 +307,7 @@ public final class Messenger {
         refusedTokens.removeAll()
         reconnectAttempts.removeAll()
         requests.removeAll()
+        endAllPhotoTransfers()
         open.forEach(parkUnconfirmedMessages)
     }
 
@@ -357,7 +402,9 @@ public final class Messenger {
     }
 
     public func deleteMessage(_ messageID: UUID, in id: ContactID) {
+        let removed = conversations[id]?.messages.filter { $0.id == messageID } ?? []
         conversations[id]?.messages.removeAll { $0.id == messageID }
+        forgetPhotos(of: removed)
         persist(id)
     }
 
@@ -373,8 +420,9 @@ public final class Messenger {
     // MARK: Contacts
 
     public func clearConversation(_ id: ContactID) {
-        guard conversations[id] != nil else { return }
+        guard let old = conversations[id] else { return }
         conversations[id] = Conversation()
+        forgetPhotos(of: old.messages)
         persist(id)
     }
 
@@ -382,6 +430,7 @@ public final class Messenger {
     public func removeContact(_ id: ContactID) {
         closeLinks(to: id)
         contacts.removeAll { $0.id == id }
+        forgetPhotos(of: conversations[id]?.messages ?? [])
         conversations[id] = nil
         knownMessageIDs[id] = nil
         persistence.save(contacts: contacts)
@@ -412,6 +461,7 @@ public final class Messenger {
         stop()
         identityStore.delete()
         persistence.eraseAll()
+        attachments.deleteAll()
         identity = Identity()
         identityIsStored = (try? identityStore.save(identity.rawRepresentation)) != nil
         profile = Profile()
@@ -667,6 +717,8 @@ public final class Messenger {
             guard auth.identityKey.count == 32, auth.identityKey != identity.publicKey,
                   Identity.verify(signature: auth.signature, of: transcript, identityKey: auth.identityKey)
             else { throw LinkFailure.verificationFailed }
+            // Trust only what this link announced: a contact may have changed Earshot versions.
+            links[token]?.peerFeatures = Self.acceptedFeatures(auth.features)
             try establish(token, identityKey: auth.identityKey, name: auth.name)
 
         case (.text(let text), .established(let id)):
@@ -678,27 +730,7 @@ public final class Messenger {
                 return
             }
             let message = Message(id: text.id, direction: .incoming, text: text.text, status: .delivered)
-            conversations[id, default: Conversation()].messages.append(message)
-            knownMessageIDs[id, default: []].insert(text.id)
-            trimHistory(id)
-            if activeConversation != id { conversations[id]?.unreadCount += 1 }
-            onEvent?(.messageReceived(id, message))
-
-            // "Delivered" means stored. The receipt goes out only once the save has succeeded.
-            guard let conversation = conversations[id] else { return }
-            let linkID = link.id, messageID = text.id
-            persistence.save(conversation: conversation, for: id) { [weak self] stored in
-                guard stored else { return }
-                let confirm: @MainActor @Sendable () -> Void = {
-                    guard let self, self.links[token]?.id == linkID else { return }
-                    try? self.send(.ack(messageID), to: token)
-                }
-                if Thread.isMainThread {
-                    MainActor.assumeIsolated(confirm)
-                } else {
-                    DispatchQueue.main.async { MainActor.assumeIsolated(confirm) }
-                }
-            }
+            storeIncoming(message, from: id, token: token, linkID: link.id)
 
         case (.ack(let messageID), .established(let id)):
             if let message = messages(for: id).first(where: { $0.id == messageID }),
@@ -706,12 +738,44 @@ public final class Messenger {
                 setStatus(.delivered, of: messageID, in: id)
                 persist(id)
             }
+            photoDelivered(messageID, on: token)
+
+        case (.photoStart, .established), (.photoPiece, .established), (.photoProgress, .established),
+             (.photoCancel, .established), (.photoRefuse, .established):
+            // An older Earshot cannot decode these at all and closes the link; the test switch copies that.
+            if configuration.legacyProtocolForTesting { throw LinkFailure.protocolViolation }
+            try handlePhoto(payload, from: token)
 
         case (.bye, .established):
             throw LinkFailure.remoteLeft
 
         default:
             throw LinkFailure.protocolViolation
+        }
+    }
+
+    /// Stores a received message and sends the receipt once it is safely saved:
+    /// "Delivered" on the other phone means stored on this one.
+    func storeIncoming(_ message: Message, from id: ContactID, token: PeerToken, linkID: UUID) {
+        conversations[id, default: Conversation()].messages.append(message)
+        knownMessageIDs[id, default: []].insert(message.id)
+        trimHistory(id)
+        if activeConversation != id { conversations[id]?.unreadCount += 1 }
+        onEvent?(.messageReceived(id, message))
+
+        guard let conversation = conversations[id] else { return }
+        let messageID = message.id
+        persistence.save(conversation: conversation, for: id) { [weak self] stored in
+            guard stored else { return }
+            let confirm: @MainActor @Sendable () -> Void = {
+                guard let self, self.links[token]?.id == linkID else { return }
+                try? self.send(.ack(messageID), to: token)
+            }
+            if Thread.isMainThread {
+                MainActor.assumeIsolated(confirm)
+            } else {
+                DispatchQueue.main.async { MainActor.assumeIsolated(confirm) }
+            }
         }
     }
 
@@ -741,6 +805,7 @@ public final class Messenger {
         for (other, stale) in links where other != token && (stale.contactID == id || stale.expected == id) {
             links[other] = nil
             transport.disconnect(other)
+            endPhotoTransfers(on: other)
         }
         // They have proven who they are. If we were holding back, prove ourselves now.
         if !link.authSent {
@@ -751,6 +816,8 @@ public final class Messenger {
         link.phase = .established(id)
         link.incomingBudget = configuration.incomingBurst
         link.budgetUpdated = .now
+        link.photoByteBudget = configuration.incomingPhotoByteBurst
+        link.photoBudgetUpdated = .now
         links[token] = link
         discovered[token]?.contactID = id
         reconnectAttempts[id] = 0
@@ -765,7 +832,7 @@ public final class Messenger {
 
     // MARK: Link teardown and recovery
 
-    private func drop(_ token: PeerToken, because failure: LinkFailure) {
+    func drop(_ token: PeerToken, because failure: LinkFailure) {
         guard let link = links.removeValue(forKey: token) else { return }
         transport.disconnect(token)
         linkEnded(link, because: failure)
@@ -775,11 +842,13 @@ public final class Messenger {
         for (token, link) in links where link.contactID == id || link.expected == id {
             links[token] = nil
             transport.disconnect(token)
+            endPhotoTransfers(on: token)
         }
         parkUnconfirmedMessages(id)
     }
 
     private func linkEnded(_ link: Link, because failure: LinkFailure?) {
+        endPhotoTransfers(on: link.token)
         if let id = link.contactID {
             parkUnconfirmedMessages(id)
             scheduleReconnect(id)
@@ -834,7 +903,7 @@ public final class Messenger {
 
     // MARK: Sending
 
-    private func send(_ payload: Payload, to token: PeerToken) throws {
+    func send(_ payload: Payload, to token: PeerToken) throws {
         guard var link = links[token], var channel = link.channel else { throw TransportError.notConnected }
         let sealed = try channel.seal(try payload.encoded())
         link.channel = channel
@@ -851,12 +920,14 @@ public final class Messenger {
         link.authSent = true
         links[token] = link
         try send(.auth(.init(identityKey: identity.publicKey, name: profile.displayName,
-                             signature: try identity.sign(transcript))), to: token)
+                             signature: try identity.sign(transcript),
+                             features: configuration.legacyProtocolForTesting ? nil : Feature.all)), to: token)
     }
 
-    private func transmit(_ messageID: UUID, to id: ContactID) {
+    func transmit(_ messageID: UUID, to id: ContactID) {
         guard let message = messages(for: id).first(where: { $0.id == messageID }),
               let link = links.values.first(where: { $0.contactID == id }) else { return }
+        if message.photo != nil { return transmitPhoto(message, to: id, over: link) }
         // Mark it first: on a fast link the receipt can arrive before `send` returns.
         setStatus(.sending, of: messageID, in: id)
         do {
@@ -877,7 +948,7 @@ public final class Messenger {
     }
 
     /// Enforces the per-link allowance for incoming messages.
-    private func chargeIncomingMessage(on token: PeerToken) throws {
+    func chargeIncomingMessage(on token: PeerToken) throws {
         guard var link = links[token] else { return }
         let now = ContinuousClock.now
         let elapsed = Double((now - link.budgetUpdated).components.seconds)
@@ -890,18 +961,20 @@ public final class Messenger {
     }
 
     private func trimHistory(_ id: ContactID) {
-        guard let count = conversations[id]?.messages.count, count > Limits.maxStoredMessages else { return }
+        guard let count = conversations[id]?.messages.count, count > Limits.maxStoredMessages,
+              let dropped = conversations[id]?.messages.prefix(count - Limits.maxStoredMessages) else { return }
         conversations[id]?.messages.removeFirst(count - Limits.maxStoredMessages)
+        forgetPhotos(of: Array(dropped))
     }
 
-    private func setStatus(_ status: DeliveryStatus, of messageID: UUID, in id: ContactID) {
+    func setStatus(_ status: DeliveryStatus, of messageID: UUID, in id: ContactID) {
         guard let index = conversations[id]?.messages.lastIndex(where: { $0.id == messageID }) else { return }
         conversations[id]?.messages[index].status = status
     }
 
     // MARK: Helpers
 
-    private func persist(_ id: ContactID) {
+    func persist(_ id: ContactID) {
         guard let conversation = conversations[id] else { return }
         persistence.save(conversation: conversation, for: id, completion: nil)
     }
@@ -911,7 +984,7 @@ public final class Messenger {
         change(&requests[index])
     }
 
-    private func after(_ delay: Duration, _ action: @escaping @MainActor (Messenger) -> Void) {
+    func after(_ delay: Duration, _ action: @escaping @MainActor (Messenger) -> Void) {
         let epoch = epoch
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
@@ -921,7 +994,7 @@ public final class Messenger {
     }
 
     /// Recomputes the state the interface reads from the internal link tables.
-    private func refresh() {
+    func refresh() {
         var states: [ContactID: LinkState] = [:]
         for found in discovered.values where !found.isBlocked {
             if let id = found.contactID { states[id] = .inRange }
@@ -934,6 +1007,10 @@ public final class Messenger {
             }
         }
         if states != linkStates { linkStates = states }
+        let photoCapable = Set(links.values.compactMap { link in
+            link.peerFeatures.contains(Feature.photo) ? link.contactID : nil
+        })
+        if photoCapable != photoCapableContacts { photoCapableContacts = photoCapable }
 
         let peers = discovered.values.filter { !$0.isBlocked }.map { found in
             NearbyPeer(id: found.token,

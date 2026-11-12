@@ -58,14 +58,35 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
     public let timestamp: Date
     /// Only meaningful for outgoing messages. Incoming messages are always `.delivered`.
     public var status: DeliveryStatus
+    /// Set when the message is a photo. `text` is then the optional caption (often empty).
+    /// Optional, so conversations saved by earlier versions (which have no such key) still load.
+    public let photo: PhotoAttachment?
 
     public init(id: UUID = UUID(), direction: Direction, text: String, timestamp: Date = Date(),
-                status: DeliveryStatus) {
+                status: DeliveryStatus, photo: PhotoAttachment? = nil) {
         self.id = id
         self.direction = direction
         self.text = text
         self.timestamp = timestamp
         self.status = status
+        self.photo = photo
+    }
+}
+
+/// A photo stored on this phone as its own file (see `AttachmentStore`).
+public struct PhotoAttachment: Codable, Sendable, Hashable {
+    /// The file's name inside the attachment folder, for example `"6F9619FF-….jpg"`.
+    public let fileName: String
+    public let byteCount: Int
+    /// Real pixel size, read from the file itself (never taken from the sender's word).
+    public let width: Int
+    public let height: Int
+
+    public init(fileName: String, byteCount: Int, width: Int, height: Int) {
+        self.fileName = fileName
+        self.byteCount = byteCount
+        self.width = width
+        self.height = height
     }
 }
 
