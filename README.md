@@ -46,7 +46,7 @@ also a [web version](#web-version) for Chrome and Edge on computers and Android 
 </p>
 <p align="center">
   <img src="docs/showcase/tile-nearby.png" width="30%" alt="Nearby: waiting for two people to accept a request, with Cancel buttons">
-  <img src="docs/showcase/tile-contact.png" width="30%" alt="A contact's page with the safety code 400 439 951, marked Verified">
+  <img src="docs/showcase/tile-contact.png" width="30%" alt="A contact's page with a nine-digit safety code, marked Verified">
   <img src="docs/showcase/tile-notification.png" width="30%" alt="A notification banner for a new message from Maya Okafor">
 </p>
 <p align="center">
@@ -187,8 +187,10 @@ npx playwright test                  # 47 browser tests (uses ports 5183 and 518
 
 ### Showcase images
 
-The images at the top of this page are made from the screenshots in `docs/screenshots/`
-by one command, run from the repository root after `npm install` in `web/`:
+The iPhone screenshots in `docs/screenshots/` are retaken with `Scripts/screenshots.sh`
+(it uses its own "Earshot Shots" simulator; see the top of the script).
+The images at the top of this page are made from those screenshots by one command, run
+from the repository root after `npm install` in `web/`:
 
 ```sh
 node Tools/showcase/generate.mjs
@@ -234,6 +236,10 @@ Verified on real hardware (12 November 2026, iPhone 17 Pro and iPhone 15, plus a
 - Background delivery: with the two phones connected, one phone was locked, the other
   sent a message, the locked phone showed a notification and the sender showed Delivered
   (observed by hand).
+- Tapping a message notification opens that conversation (observed by hand, after a fix:
+  the first build stopped the app on a tap).
+- Photos sent in both directions between the two iPhones over Bluetooth LE (observed by
+  hand; transfer time and speed not yet measured).
 
 **Not yet verified — still needs checking on real phones:**
 
