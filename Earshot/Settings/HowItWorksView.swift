@@ -31,6 +31,12 @@ struct HowItWorksView: View {
                 ExplainerRow(systemImage: "checkmark.circle",
                              title: "“Delivered” means delivered",
                              detail: "Delivered appears only after the other phone confirms it received and saved your message. “Not delivered” means no confirmation came back — for example, their phone couldn't save it. Tap it to try again.")
+                ExplainerRow(systemImage: "photo",
+                             title: "Photos, slowly but surely",
+                             detail: "Tap the photo button while you're connected to send one photo at a time. Earshot shrinks it to about 150 KB and removes its location and camera details first. Over Bluetooth that takes a few seconds to about half a minute. If the connection drops, the photo starts again when you're back in range. Video isn't supported.")
+                ExplainerRow(systemImage: "textformat",
+                             title: "Formatting",
+                             detail: "Type *bold*, _italic_, ~strikethrough~ or `code`. Web links, email addresses and phone numbers become tappable. Nothing opens until you tap it, and Earshot never loads link previews.")
             }
             .padding(20)
             .frame(maxWidth: 640)

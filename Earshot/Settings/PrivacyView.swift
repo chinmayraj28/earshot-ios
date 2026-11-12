@@ -25,6 +25,12 @@ struct PrivacyView: View {
                 ExplainerRow(systemImage: "internaldrive",
                              title: "Stored only on this phone",
                              detail: "Messages and contacts stay on this device and are left out of iCloud and computer backups. iOS keeps them encrypted until the phone has been unlocked once after a restart; after that Earshot can read them, so it can save a message that arrives while the phone is locked.")
+                ExplainerRow(systemImage: "photo",
+                             title: "Photos without the hidden details",
+                             detail: "Before a photo is sent, Earshot removes its location, camera model and date. Photos are kept only on your two phones, protected like messages and left out of backups. Earshot never sees your photo library: you pick one photo at a time.")
+                ExplainerRow(systemImage: "link",
+                             title: "Links are never fetched",
+                             detail: "Earshot doesn't load link previews or anything else from the internet. A link only opens, in Safari, Mail or Phone, when you tap it.")
                 ExplainerRow(systemImage: "bell",
                              title: "Notifications stay on the phone",
                              detail: "Notifications are created on this phone. Nothing goes to any server. By default they show only who wrote; showing the text is your choice in Settings.")

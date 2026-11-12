@@ -5,6 +5,8 @@ import Foundation
 enum ChatItem: Identifiable, Equatable {
     case separator(Date)
     case message(Message, ChatItem.Position)
+    /// A photo that is still arriving. Always after the stored messages.
+    case incomingPhoto(IncomingPhoto)
 
     struct Position: Equatable {
         /// First bubble in a run from the same side.
@@ -17,6 +19,7 @@ enum ChatItem: Identifiable, Equatable {
         switch self {
         case .separator(let date): "sep-\(date.timeIntervalSinceReferenceDate)"
         case .message(let message, _): message.id.uuidString
+        case .incomingPhoto(let photo): "incoming-\(photo.id.uuidString)"
         }
     }
 
@@ -25,7 +28,7 @@ enum ChatItem: Identifiable, Equatable {
     /// A time separator is shown on a new day, or after this long a pause.
     static let separatorGap: TimeInterval = 60 * 60
 
-    static func build(from messages: [Message], calendar: Calendar = .current) -> [ChatItem] {
+    static func build(from messages: [Message], arriving: [IncomingPhoto] = [], calendar: Calendar = .current) -> [ChatItem] {
         var items: [ChatItem] = []
         items.reserveCapacity(messages.count + 4)
         for (index, message) in messages.enumerated() {
@@ -39,6 +42,7 @@ enum ChatItem: Identifiable, Equatable {
             let isLast = next.map { needsBreak(between: message, and: $0, calendar: calendar) || !groups(message, with: $0) } ?? true
             items.append(.message(message, Position(isFirst: isFirst, isLast: isLast)))
         }
+        items += arriving.map(ChatItem.incomingPhoto)
         return items
     }
 

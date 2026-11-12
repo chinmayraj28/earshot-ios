@@ -8,7 +8,8 @@ import UserNotifications
 ///
 /// - A message notifies when Earshot isn't active, or when that conversation isn't on screen.
 /// - A request notifies only when Earshot isn't active (otherwise the request sheet shows).
-/// - The body says "New message" unless the person turned on "Show message text".
+/// - The body says "New message" unless the person turned on "Show message text". With it on,
+///   a photo says "Photo" (plus its caption), and text is shown raw, exactly as typed.
 /// - Permission is asked at a relevant moment (after the first new contact connects, or from
 ///   Settings), never at launch.
 @MainActor
@@ -117,7 +118,7 @@ final class NotificationManager: NSObject {
             let name = messenger?.contact(id)?.displayName ?? "New message"
             let showText = defaults.bool(forKey: Self.showTextKey)
             post(identifier: "message-\(message.id.uuidString)", title: name,
-                 body: showText ? message.text : "New message",
+                 body: showText ? Self.body(for: message) : "New message",
                  thread: id.rawValue, userInfo: [Self.kindKey: "message", Self.contactKey: id.rawValue])
         case .requestReceived(let request):
             guard UIApplication.shared.applicationState != .active else { return }
@@ -127,6 +128,12 @@ final class NotificationManager: NSObject {
         case .connected:
             break
         }
+    }
+
+    /// What a notification says when message text is shown.
+    static func body(for message: Message) -> String {
+        guard message.photo != nil else { return message.text }
+        return message.text.isEmpty ? "Photo" : "Photo: \(message.text)"
     }
 
     private func post(identifier: String, title: String, body: String, thread: String, userInfo: [String: String]) {

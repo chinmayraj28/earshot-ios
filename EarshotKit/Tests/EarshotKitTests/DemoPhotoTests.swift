@@ -9,7 +9,8 @@ import Testing
         let me = world.messenger
         me.start()
         let maya = try #require(me.contacts.first { $0.displayName == "Maya Okafor" })
-        let stored = try #require(me.messages(for: maya.id).first { $0.photo != nil }, "the history includes a photo")
+        let jonas = try #require(me.contacts.first { $0.displayName == "Jonas Weber" })
+        let stored = try #require(me.messages(for: jonas.id).first { $0.photo != nil }, "the history includes a photo")
         #expect(me.photoSource(for: stored) != nil)
         await waitUntil("Maya connects") { me.canSendPhoto(to: maya.id) }
 

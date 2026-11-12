@@ -60,14 +60,14 @@ public final class DemoWorld {
                          _ status: DeliveryStatus = .delivered) -> Message {
                 Message(direction: direction, text: text, timestamp: now.addingTimeInterval(-minutesAgo * 60), status: status)
             }
-            // One photo already in the history, stored like a received one.
+            // One photo already in Jonas's history, stored like a received one.
             var photoMessage: [Message] = []
             if let picture = try? PhotoProcessing.prepare(.data(PhotoProcessing.sampleJPEG(width: 1600, height: 1200, seed: 1))) {
                 let id = UUID()
                 let name = AttachmentStore.fileName(for: id)
                 if (try? attachments.save(picture.jpeg, as: name)) != nil {
-                    photoMessage = [Message(id: id, direction: .incoming, text: "View from carriage 2 😅",
-                                            timestamp: now.addingTimeInterval(-32 * 60), status: .delivered,
+                    photoMessage = [Message(id: id, direction: .incoming, text: "The queue for the food trucks 😅",
+                                            timestamp: now.addingTimeInterval(-60 * 26 * 60 + 30), status: .delivered,
                                             photo: PhotoAttachment(fileName: name, byteCount: picture.jpeg.count,
                                                                    width: picture.width, height: picture.height))]
                 }
@@ -75,13 +75,13 @@ public final class DemoWorld {
             state.conversations[maya.contactID] = Conversation(messages: [
                 message(.incoming, "Train's stuck in the tunnel. Zero bars.", 34),
                 message(.outgoing, "Same in carriage 4. Are you near the *front*?", 33),
-            ] + photoMessage + [
                 message(.incoming, "Carriage 2. They say twenty minutes.", 31),
                 message(.outgoing, "OK. Meet on the platform by the stairs when we get in?", 30),
                 message(.incoming, "Deal. I'll wait by the stairs.", 29),
             ])
             state.conversations[jonas.contactID] = Conversation(messages: [
                 message(.incoming, "Main stage is packed, heading to the food trucks.", 60 * 26),
+            ] + photoMessage + [
                 message(.outgoing, "On my way. Save me a seat.", 60 * 26 - 2),
                 message(.outgoing, "Which truck are you at?", 60 * 25, .waiting),
             ])
