@@ -31,6 +31,10 @@ public final class DemoWorld {
 
     /// A made-up landscape picture, the same on every launch, used as "the photo you picked"
     /// in demo mode and UI tests (the system photo picker cannot be driven reliably by tests).
+    /// What a demo person sends back when asked for a photo.
+    static let samplePhoto2: PreparedPhoto? =
+        try? PhotoProcessing.prepare(.data(PhotoProcessing.sampleJPEG(width: 1200, height: 1600, seed: 2)))
+
     public static let samplePhoto: PreparedPhoto? =
         try? PhotoProcessing.prepare(.data(PhotoProcessing.sampleJPEG(width: 1600, height: 1200, seed: 0)))
 
@@ -121,6 +125,10 @@ public final class DemoWorld {
                     if message.photo != nil {
                         bot.send("Got the photo, thanks! 📷", to: id)
                         return
+                    }
+                    // Ask a demo person for a "photo" and they send one back (for trying out receiving).
+                    if message.text.localizedCaseInsensitiveContains("photo"), let picture = Self.samplePhoto2 {
+                        if bot.sendPhoto(picture, caption: "Here you go", to: id) != nil { return }
                     }
                     let index = self.replyIndex[name, default: 0]
                     self.replyIndex[name] = index + 1

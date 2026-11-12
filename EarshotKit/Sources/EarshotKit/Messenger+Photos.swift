@@ -311,7 +311,10 @@ extension Messenger {
             return
         }
         if let existing = incomingTransfers[start.id] {
-            guard existing.token != token, !existing.isChecking else { throw LinkFailure.protocolViolation }
+            guard existing.token != token else { throw LinkFailure.protocolViolation }
+            // Fully received over the previous link and being checked right now: once stored,
+            // the receipt goes out over this link; the pieces that follow are ignored.
+            if existing.isChecking { return }
             discardIncoming(start.id)
         }
         func refuse() throws { try send(.photoRefuse(start.id), to: token) }
@@ -400,7 +403,7 @@ extension Messenger {
                                          width: size.width, height: size.height)
         let message = Message(id: messageID, direction: .incoming, text: transfer.caption, status: .delivered,
                               photo: attachment)
-        storeIncoming(message, from: transfer.contactID, token: transfer.token, linkID: transfer.linkID)
+        storeIncoming(message, from: transfer.contactID, token: transfer.token, linkID: transfer.linkID, orNewerLink: true)
     }
 
     /// Throws away a photo being received and tells the sender, if the link is still the same.

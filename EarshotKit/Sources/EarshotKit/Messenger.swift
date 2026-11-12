@@ -756,7 +756,9 @@ public final class Messenger {
 
     /// Stores a received message and sends the receipt once it is safely saved:
     /// "Delivered" on the other phone means stored on this one.
-    func storeIncoming(_ message: Message, from id: ContactID, token: PeerToken, linkID: UUID) {
+    /// - Parameter orNewerLink: also send the receipt if the link was replaced by a newer one to
+    ///   the same contact meanwhile (photos: checking one can outlast the link it came over).
+    func storeIncoming(_ message: Message, from id: ContactID, token: PeerToken, linkID: UUID, orNewerLink: Bool = false) {
         conversations[id, default: Conversation()].messages.append(message)
         knownMessageIDs[id, default: []].insert(message.id)
         trimHistory(id)
@@ -768,8 +770,12 @@ public final class Messenger {
         persistence.save(conversation: conversation, for: id) { [weak self] stored in
             guard stored else { return }
             let confirm: @MainActor @Sendable () -> Void = {
-                guard let self, self.links[token]?.id == linkID else { return }
-                try? self.send(.ack(messageID), to: token)
+                guard let self else { return }
+                if self.links[token]?.id == linkID {
+                    try? self.send(.ack(messageID), to: token)
+                } else if orNewerLink, let current = self.links.first(where: { $0.value.contactID == id })?.key {
+                    try? self.send(.ack(messageID), to: current)
+                }
             }
             if Thread.isMainThread {
                 MainActor.assumeIsolated(confirm)
