@@ -171,20 +171,25 @@ final class NotificationManager: NSObject {
     }
 }
 
-extension NotificationManager: UNUserNotificationCenterDelegate {
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        let thread = notification.request.content.threadIdentifier
-        let kind = notification.request.content.userInfo["kind"] as? String
-        let show = await MainActor.run { shouldPresentInForeground(thread: thread, kind: kind) }
-        return show ? [.banner, .list, .sound] : []
+// These use the completion-handler form on purpose. The `async` form of these two methods
+// answers iOS from a background thread, and iOS then stops the app with "call must be
+// made on main thread". On a real phone that looked like: tap a notification, Earshot
+// does not open, and the pending connection request is gone (because the app had died).
+// iOS always calls these on the main thread, which `@preconcurrency` lets us rely on.
+extension NotificationManager: @preconcurrency UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let content = notification.request.content
+        let show = shouldPresentInForeground(thread: content.threadIdentifier, kind: content.userInfo["kind"] as? String)
+        completionHandler(show ? [.banner, .list, .sound] : [])
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            didReceive response: UNNotificationResponse) async {
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        let kind = info["kind"] as? String
-        let contactID = info["contactID"] as? String
-        await MainActor.run { open(kind: kind, contactID: contactID) }
+        open(kind: info["kind"] as? String, contactID: info["contactID"] as? String)
+        completionHandler()
     }
 }
