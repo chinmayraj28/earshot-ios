@@ -732,7 +732,7 @@ extension BluetoothTransport: @preconcurrency CBPeripheralManagerDelegate {
         guard isRunning else { return peripheral.respond(to: first, withResult: .writeNotPermitted) }
         // All or nothing: check every request before applying any of them.
         for request in requests {
-            guard request.characteristic.uuid == Self.inboxID, request.offset == 0, request.value != nil else {
+            guard request.characteristic.uuid == Self.inboxID, request.value != nil else {
                 return peripheral.respond(to: first, withResult: .requestNotSupported)
             }
             // Only phones that are listening for our answers may write.
@@ -740,12 +740,20 @@ extension BluetoothTransport: @preconcurrency CBPeripheralManagerDelegate {
                 return peripheral.respond(to: first, withResult: .insufficientAuthorization)
             }
         }
-        for request in requests {
-            let id = request.central.identifier
+        // A chunk too big for one Bluetooth packet arrives as a "long write": several requests
+        // with growing offsets. Join them back into one chunk first (see `mergeWrites`).
+        // Requests with an offset that do not continue the previous one are refused.
+        let pieces = requests.map {
+            BluetoothWire.WritePiece(writer: $0.central.identifier, offset: $0.offset, value: $0.value ?? Data())
+        }
+        guard let writes = BluetoothWire.mergeWrites(pieces) else {
+            return peripheral.respond(to: first, withResult: .invalidOffset)
+        }
+        for (id, value) in writes {
             let linked = tokensByCentral[id].flatMap { remotes[$0] }?.route == .asPeripheral
             let limit = linked ? BluetoothWire.maxFrameLength : BluetoothWire.maxUnlinkedFrameLength
             do {
-                if let frame = try inbound[id, default: BluetoothWire.Reassembler()].append(request.value ?? Data(), limit: limit) {
+                if let frame = try inbound[id, default: BluetoothWire.Reassembler()].append(value, limit: limit) {
                     frameReceived(frame, fromCentral: id)
                 }
             } catch {

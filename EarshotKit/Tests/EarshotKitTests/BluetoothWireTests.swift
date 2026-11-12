@@ -50,6 +50,29 @@ struct BluetoothWireTests {
         #expect(result == frame)
     }
 
+    @Test func longWritePiecesAreJoined() throws {
+        let a = UUID(), b = UUID()
+        func piece(_ writer: UUID, _ offset: Int, _ count: Int, _ byte: UInt8) -> BluetoothWire.WritePiece {
+            .init(writer: writer, offset: offset, value: Data(repeating: byte, count: count))
+        }
+        // A 200-byte chunk split by the radio into 180 + 20, followed by a separate write from someone else.
+        let merged = try #require(BluetoothWire.mergeWrites([piece(a, 0, 180, 1), piece(a, 180, 20, 2), piece(b, 0, 50, 3)]))
+        #expect(merged.count == 2)
+        #expect(merged[0].writer == a)
+        #expect(merged[0].value == Data(repeating: 1, count: 180) + Data(repeating: 2, count: 20))
+        #expect(merged[1].writer == b && merged[1].value.count == 50)
+        // Ordinary short writes pass through unchanged.
+        #expect(BluetoothWire.mergeWrites([piece(a, 0, 20, 1)])?.first?.value.count == 20)
+        // A gap, an overlap, a different writer, or a piece with nothing to continue is refused.
+        #expect(BluetoothWire.mergeWrites([piece(a, 0, 180, 1), piece(a, 200, 20, 2)]) == nil)
+        #expect(BluetoothWire.mergeWrites([piece(a, 0, 180, 1), piece(a, 100, 20, 2)]) == nil)
+        #expect(BluetoothWire.mergeWrites([piece(a, 0, 180, 1), piece(b, 180, 20, 2)]) == nil)
+        #expect(BluetoothWire.mergeWrites([piece(a, 18, 20, 2)]) == nil)
+        // Never more than one attribute's worth (512 bytes) in one joined value.
+        #expect(BluetoothWire.mergeWrites([piece(a, 0, 500, 1), piece(a, 500, 13, 2)]) == nil)
+        #expect(BluetoothWire.mergeWrites([piece(a, 0, 500, 1), piece(a, 500, 12, 2)])?.first?.value.count == 512)
+    }
+
     @Test func reassemblerHandlesBackToBackFrames() throws {
         var reassembler = BluetoothWire.Reassembler()
         for text in ["first", "second message", ""] {

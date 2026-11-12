@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      The Content-Security-Policy comes from VITE_CSP in .env.production (strict: only this
+      site's own files, no inline scripts, no network connections to anyone else) and
+      .env.development (relaxed just enough for Vite's live-reload scripts while developing).
+    -->
+    <meta http-equiv="Content-Security-Policy" content="%VITE_CSP%" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="description" content="Text a nearby iPhone running Earshot over Bluetooth, with no internet." />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#F5EFE6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>Earshot</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Earshot needs JavaScript to run. Nothing is sent anywhere; it runs entirely in this browser.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

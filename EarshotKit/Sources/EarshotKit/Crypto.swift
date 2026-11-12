@@ -116,8 +116,15 @@ enum CryptoError: Error {
 struct Handshake {
     static let version: UInt8 = 1
 
-    private let ephemeral = Curve25519.KeyAgreement.PrivateKey()
+    private let ephemeral: Curve25519.KeyAgreement.PrivateKey
     var publicKey: Data { ephemeral.publicKey.rawRepresentation }
+
+    /// A fresh random one-time key: what every real link uses.
+    init() { ephemeral = Curve25519.KeyAgreement.PrivateKey() }
+
+    /// A fixed one-time key. Only for tests that must produce the same bytes on every run,
+    /// for example the cross-checks against the web client (WebVectorsTests).
+    init(fixedEphemeral: Curve25519.KeyAgreement.PrivateKey) { ephemeral = fixedEphemeral }
 
     /// Derives the encrypted channel once the other side's ephemeral key is known.
     func channel(remoteEphemeral: Data) throws -> SecureChannel {

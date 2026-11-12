@@ -88,6 +88,45 @@ enum BluetoothWire {
         return value
     }
 
+    // MARK: Long writes
+
+    /// Largest value a single Bluetooth attribute write may carry (Bluetooth Core spec, ATT).
+    static let maxAttributeValueLength = 512
+
+    /// One write request as Core Bluetooth hands it over: who wrote, where in the value, and what.
+    struct WritePiece: Equatable {
+        let writer: UUID
+        let offset: Int
+        let value: Data
+    }
+
+    /// Joins the pieces of "long writes" back into whole values.
+    ///
+    /// Why this exists: a phone or a browser that wants to write more bytes than fit in one
+    /// Bluetooth packet sends a "long write". iOS then hands us several requests in one batch:
+    /// the first with offset 0, the next ones with offset 180, 360 ... continuing the same value.
+    /// Chrome does this on its own when a web page writes a chunk that is larger than the
+    /// connection allows. Each joined value is one chunk for `Reassembler`.
+    ///
+    /// Example: pieces (A, 0, 180 bytes), (A, 180, 20 bytes), (B, 0, 50 bytes) become
+    /// [(A, 200 bytes), (B, 50 bytes)].
+    ///
+    /// Returns nil, so the whole batch is refused, when a piece with an offset does not continue
+    /// the previous piece exactly (other writer, gap or overlap) or a joined value is too long.
+    static func mergeWrites(_ pieces: [WritePiece]) -> [(writer: UUID, value: Data)]? {
+        var merged: [(writer: UUID, value: Data)] = []
+        for piece in pieces {
+            if piece.offset == 0 {
+                merged.append((piece.writer, piece.value))
+            } else {
+                guard let last = merged.last, last.writer == piece.writer, last.value.count == piece.offset else { return nil }
+                merged[merged.count - 1].value.append(piece.value)
+            }
+            guard let current = merged.last, current.value.count <= maxAttributeValueLength else { return nil }
+        }
+        return merged
+    }
+
     // MARK: Chunking
 
     /// Cuts a frame into pieces of at most `maxChunkLength` bytes, marker byte included.

@@ -6,6 +6,9 @@
 //   swift run earshot-probe --name "Probe" --echo                 (Wi-Fi/Multipeer: pairs with the iOS Simulator)
 //   swift run earshot-probe --name "Probe" --echo --bluetooth     (Bluetooth LE: pairs with a real iPhone)
 //   swift run earshot-probe --name "Caller" --invite "Probe" --send "hello" --exit-after-delivery
+//   swift run earshot-probe --name "Probe" --echo --pipe 20      (debug builds: Bluetooth frames over
+//                                                               stdin/stdout, for the web client's tests;
+//                                                               20 = notification chunk size. See PipeTransport.swift)
 //
 // It accepts every incoming request, prints what happens, and (with --echo)
 // replies to each message with "Echo: <text>".
@@ -22,6 +25,8 @@ var textToSend: String?
 var exitAfterDelivery = false
 var timeout: Double?
 var radio = Radio.multipeer
+/// Set by `--pipe N`: use the stdin/stdout radio with notification chunks of N bytes.
+var pipeChunkLength: Int?
 
 var arguments = CommandLine.arguments.dropFirst().makeIterator()
 while let argument = arguments.next() {
@@ -33,13 +38,28 @@ while let argument = arguments.next() {
     case "--send": textToSend = arguments.next()
     case "--exit-after-delivery": exitAfterDelivery = true
     case "--timeout": timeout = arguments.next().flatMap(Double.init)
+    case "--pipe": pipeChunkLength = arguments.next().flatMap { Int($0) } ?? 20
     default:
         print("unknown argument \(argument)")
         exit(64)
     }
 }
 
-let messenger = Messenger.ephemeral(radio: radio)
+let messenger: Messenger
+#if DEBUG
+if let pipeChunkLength {
+    messenger = Messenger(transport: PipeTransport(notifyChunkLength: pipeChunkLength),
+                          persistence: InMemoryPersistence(), identityStore: InMemoryIdentityStore())
+} else {
+    messenger = Messenger.ephemeral(radio: radio)
+}
+#else
+if pipeChunkLength != nil {
+    print("--pipe is only available in debug builds")
+    exit(64)
+}
+messenger = Messenger.ephemeral(radio: radio)
+#endif
 messenger.completeOnboarding(displayName: name)
 
 messenger.onEvent = { event in
@@ -61,7 +81,7 @@ messenger.onEvent = { event in
 }
 
 messenger.start()
-print("STARTED as \(name) over \(radio)")
+print("STARTED as \(name) over \(pipeChunkLength == nil ? "\(radio)" : "pipe")")
 
 var seen: Set<PeerToken> = []
 var invited: Set<PeerToken> = []

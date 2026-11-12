@@ -6,3 +6,4 @@ build/
 xcuserdata/
 *.xcresult
 graphify-out/
+.claude/
