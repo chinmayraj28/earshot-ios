@@ -20,20 +20,13 @@ targets:
     dependencies:
       - package: EarshotKit
         product: EarshotKit
-    info:
-      path: Earshot/Info.plist
-      properties:
-        CFBundleDisplayName: Earshot
-        UILaunchScreen: {}
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        ITSAppUsesNonExemptEncryption: false
-        NSLocalNetworkUsageDescription: Earshot uses the local network to find nearby iPhones and exchange messages with them directly, without the internet.
-        NSBonjourServices:
-          - _earshot-msg._tcp
-          - _earshot-msg._udp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.earshot.Earshot
+        # Hand-written so that the Local Network keys only exist in Simulator builds.
+        INFOPLIST_FILE: Earshot/Info.plist
+        INFOPLIST_PREPROCESS: YES
+        "INFOPLIST_PREPROCESSOR_DEFINITIONS[sdk=iphonesimulator*]": EARSHOT_SIMULATOR
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

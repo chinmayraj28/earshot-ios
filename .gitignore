@@ -5,5 +5,4 @@ build/
 *.xcodeproj
 xcuserdata/
 *.xcresult
-Earshot/Info.plist
 graphify-out/
