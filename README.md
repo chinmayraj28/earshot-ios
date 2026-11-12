@@ -101,23 +101,30 @@ Verified on this project's development machine:
   MultipeerConnectivity, not Bluetooth.
 - The Bluetooth layer was code-reviewed independently and its byte formats are unit-tested.
 
-**Not yet verified — needs real hardware:**
+Verified on real hardware (12 November 2026, iPhone 17 Pro and iPhone 15, plus a Mac):
 
-The Bluetooth layer (`BluetoothTransport.swift`) has **not been run between physical
-devices**. Until this checklist is done, treat background delivery as built to Apple's
-documented rules but unproven:
+- iPhone to Mac over Bluetooth LE: the phone found `earshot-probe --bluetooth`, sent a
+  request, both sides agreed on a safety code, and three messages were received by the
+  Mac and their echoes confirmed as delivered (checked in the probe's log).
+- iPhone to iPhone over Bluetooth LE: discovery, request and consent, and messages in
+  both directions, with no Mac involved (observed by hand).
+- Background delivery: with the two phones connected, one phone was locked, the other
+  sent a message, the locked phone showed a notification and the sender showed Delivered
+  (observed by hand).
 
-1. `EARSHOT_TEAM=<your team id> Scripts/device-test.sh` installs the app on a connected
-   iPhone and starts a Bluetooth partner on the Mac. Check: the Bluetooth prompt appears
-   when tapping "Turn On Earshot"; "Mac Probe" appears; request, message, Delivered and the echo work.
-2. Two iPhones: connect, exchange messages, walk apart until the link drops, walk back
-   and confirm waiting messages are delivered.
-3. Background: on phone B press the side button to lock it. From phone A (Earshot open)
-   send a message. Confirm B shows a notification and A shows Delivered. Note how long it takes.
-4. Lock both phones, bring them together, confirm nothing happens until one opens Earshot (expected).
-5. Swipe Earshot away on B, send from A: the message should stay Waiting (expected).
-6. Switch Bluetooth off and on, and refuse the Bluetooth permission, and check the status card each time.
-7. Measure practical range indoors and outdoors.
+**Not yet verified — still needs checking on real phones:**
+
+1. Walk apart until the link drops, walk back, and confirm waiting messages are delivered.
+2. Send to a phone whose Earshot was sent to the home screen a minute or more earlier and
+   then locked (the link has to survive, or be re-made by the phone that is open).
+3. Lock both phones, bring them together, confirm nothing happens until one opens Earshot (expected).
+4. Swipe Earshot away on B, send from A: the message should stay Waiting (expected).
+5. Switch Bluetooth off and on, and refuse the Bluetooth permission, and check the status card each time.
+6. The relaunch by iOS after it removes the app from memory (state restoration).
+7. Measure practical range indoors and outdoors, and how long a 2,000-character message takes.
+
+`EARSHOT_TEAM=<your team id> Scripts/device-test.sh` installs the app on a connected
+iPhone and starts a Bluetooth partner on the Mac for these checks.
 
 ## Privacy
 

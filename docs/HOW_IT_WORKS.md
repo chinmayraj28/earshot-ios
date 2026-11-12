@@ -23,11 +23,11 @@ phone-to-phone radio that iOS lets an app keep using while the app is in the bac
 Earshot declares the `bluetooth-central` and `bluetooth-peripheral` background modes.
 The rules below are iOS rules, not Earshot choices.
 
-> **Verification status.** The table describes how the code is built to behave under
-> Apple's documented Core Bluetooth background rules. The Bluetooth layer compiles for
-> iPhone and its byte formats are unit-tested, but it has **not yet been run between two
-> physical iPhones**. Treat timings and the "works" rows as expected, not measured, until
-> the hardware checklist in the README has been completed.
+> **Verification status.** On real iPhones we have confirmed discovery, connecting,
+> messaging in both directions, and a message reaching a **locked** phone over an open
+> link with a notification. The other rows describe how the code is built to behave under
+> Apple's documented Core Bluetooth background rules and are expected, not measured. The
+> README lists exactly what is still unchecked.
 
 | Situation | What happens |
 | --- | --- |
