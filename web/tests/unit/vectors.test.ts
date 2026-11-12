@@ -136,7 +136,7 @@ describe("Swift -> web vectors", () => {
 
   it("ignores unknown fields in auth (future capability flags), but refuses unknown payload cases", () => {
     const auth = JSON.parse(swift.payloads.find((p: Json) => p.case === "auth").json);
-    auth.auth._0.capabilities = { photos: 1 };
+    auth.auth._0.features = ["photo-v1"]; // what photo-capable iPhones add (optional key)
     expect(decodePayload(utf8(JSON.stringify(auth))).kind).toBe("auth");
     expect(() => decodePayload(utf8('{"photo":{"_0":{}}}'))).toThrow();
   });

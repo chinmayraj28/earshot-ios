@@ -1,19 +1,23 @@
-# Earshot
+<p align="center">
+  <img src="Earshot/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="96" alt="Earshot app icon: an ember dot with rings around it">
+</p>
 
-**Text the people near you when the network is gone.**
+<h1 align="center">Earshot</h1>
+
+<p align="center"><strong>Text the people near you when the network is gone.</strong></p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/showcase/hero.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/showcase/hero-light.png">
+    <img src="docs/showcase/hero.png" width="100%" alt="Five Earshot screens on phones: the welcome screen, people nearby, a conversation, an incoming connection request and a contact's safety code">
+  </picture>
+</p>
 
 Earshot is an iPhone app for sending text messages directly between nearby iPhones over
 Bluetooth. No internet, no Wi‑Fi, no mobile signal, no account, no server. A message can
-reach a phone that is locked in a pocket, and that phone shows a notification.
-
-<p>
-  <img src="docs/screenshots/home-light.png" width="200" alt="Home: people nearby and conversations">
-  <img src="docs/screenshots/incoming-request.png" width="200" alt="An incoming connection request">
-  <img src="docs/screenshots/chat-dark.png" width="200" alt="A conversation in dark mode">
-  <img src="docs/screenshots/notification-banner.png" width="200" alt="A notification for a new message">
-</p>
-
-More screens and states are in [`docs/screenshots`](docs/screenshots).
+reach a phone that is locked in a pocket, and that phone shows a notification. There is
+also a [web version](#web-version) for Chrome and Edge on computers and Android phones.
 
 ## What it does
 
@@ -26,6 +30,32 @@ More screens and states are in [`docs/screenshots`](docs/screenshots).
 - **Background delivery and notifications** on real iPhones, within the limits iOS sets (below).
 - **Private by design:** end-to-end encrypted between the two phones, stored only on those
   phones, no analytics, no tracking, nothing sent to anyone else.
+
+<p align="center">
+  <img src="docs/showcase/tile-home.png" width="30%" alt="Home: people nearby with Connect buttons, and conversations">
+  <img src="docs/showcase/tile-chat.png" width="30%" alt="A conversation with sent and received messages, marked Delivered">
+  <img src="docs/showcase/tile-request.png" width="30%" alt="An incoming request: Noor Haddad wants to connect, with Accept and Decline">
+</p>
+<p align="center">
+  <img src="docs/showcase/tile-nearby.png" width="30%" alt="Nearby: waiting for two people to accept a request, with Cancel buttons">
+  <img src="docs/showcase/tile-contact.png" width="30%" alt="A contact's page with the safety code 400 439 951, marked Verified">
+  <img src="docs/showcase/tile-notification.png" width="30%" alt="A notification banner for a new message from Maya Okafor">
+</p>
+<p align="center">
+  <img src="docs/showcase/tile-onboarding.png" width="30%" alt="The welcome screen: Reach people nearby when the network is gone">
+  <img src="docs/showcase/tile-settings.png" width="30%" alt="Settings: your name, visibility to people nearby, and notification options">
+  <img src="docs/showcase/tile-web-chat.png" width="30%" alt="The web version showing a conversation in a phone's browser">
+</p>
+
+More screens and states are in [`docs/screenshots`](docs/screenshots).
+
+<p align="center">
+  <img src="docs/showcase/web.png" width="100%" alt="The Earshot web version in a browser window, with the conversation list and a chat, and the same web page on a phone">
+</p>
+
+The web version runs in Chrome or Edge on a computer or an Android phone and talks to a
+nearby iPhone running Earshot over Bluetooth, with the same encryption and the same
+delivery states. See [Web version](#web-version) for what it can and cannot do.
 
 ## What iOS allows, stated plainly
 
@@ -40,6 +70,42 @@ More screens and states are in [`docs/screenshots`](docs/screenshots).
 The full explanation, including the security design and what Earshot does *not* protect
 against, is in [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md).
 
+## Web version
+
+The `web/` folder holds a web version of Earshot. It uses the same message format and
+encryption as the iPhone app, so a browser and an iPhone can talk to each other.
+
+- **Where it runs:** Chrome, Edge and other Chromium browsers on a computer or an Android
+  phone, using Web Bluetooth. Safari, Firefox and every browser on iPhone and iPad cannot
+  use Bluetooth from a web page; on an iPhone, use the app. The page must be served from a
+  secure address (`https`, or `localhost` while developing).
+- **The browser always starts the connection.** A web page cannot announce itself, so
+  phones cannot find it and nobody can send it a request. You click "Find a nearby phone",
+  pick the phone in the browser's own list, and the person holding it taps Accept.
+- **The phone must have Earshot open on its screen** to show up in that list. The list
+  may call it something like "iPhone"; the person's Earshot name appears after you pick it.
+  Once connected, the phone can be locked and the link stays open.
+- **Closing the tab ends the connection.** The page cannot receive anything while it is
+  closed. Messages you write while not connected show Waiting and send when you reconnect,
+  which is one click and one pick in the list.
+- Messages, contacts and keys are stored only in that browser's storage for the site.
+
+Run it:
+
+```sh
+cd web
+npm install
+npm run dev          # then open http://localhost:5183
+```
+
+To try it without a phone, open `http://localhost:5183/?demo=populated` (also
+`?demo=empty` and `?demo=firstRun`). Demo people exist only with that address.
+
+**Honest status:** the web engine has been checked byte for byte against the Swift engine
+on a Mac (shared test vectors, and a live test that runs the TypeScript engine against the
+real Swift code through `earshot-probe --pipe`, with only the radio simulated). A browser
+talking to a real iPhone over real Bluetooth has **not yet been verified by hand**.
+
 ## Project layout
 
 | Path | What it is |
@@ -48,6 +114,10 @@ against, is in [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md).
 | `EarshotKit/Sources/EarshotProbe/` | `earshot-probe`, a command-line Earshot peer for the Mac, used as the "second phone" in tests. |
 | `Earshot/` | The SwiftUI app. |
 | `EarshotUITests/` | UI tests, accessibility audit, screenshot capture, live-link test. |
+| `web/` | The web version (TypeScript, React, Vite): its own engine using Web Bluetooth, the interface, unit tests and browser tests. |
+| `docs/screenshots/` | App and web screenshots captured by the UI tests. |
+| `docs/showcase/` | The images at the top of this page, made from those screenshots. |
+| `Tools/showcase/` | The script that makes `docs/showcase/` (see below). |
 | `Scripts/` | `e2e.sh` (Simulator ↔ Mac over a real link), `device-test.sh` (iPhone ↔ Mac over Bluetooth). |
 | `project.yml` | [XcodeGen](https://github.com/yonaskolb/XcodeGen) description of the Xcode project. |
 
@@ -84,6 +154,26 @@ xcodebuild -project Earshot.xcodeproj -scheme Earshot \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test   # 11 UI tests incl. accessibility audit
 Scripts/e2e.sh                       # app in the Simulator <-> earshot-probe over a real radio link
 ```
+
+Web version (from `web/`):
+
+```sh
+npm run typecheck                    # TypeScript checks
+npm test                             # 69 unit tests, including the checks against the Swift engine
+npx playwright test                  # 47 browser tests (uses ports 5183 and 5184)
+```
+
+### Showcase images
+
+The images at the top of this page are made from the screenshots in `docs/screenshots/`
+by one command, run from the repository root after `npm install` in `web/`:
+
+```sh
+node Tools/showcase/generate.mjs
+```
+
+Which screenshot goes where is set in the `CONFIG` object at the top of
+`Tools/showcase/generate.mjs`. More detail is in [`Tools/showcase/README.md`](Tools/showcase/README.md).
 
 ## What has been verified, and what has not
 
