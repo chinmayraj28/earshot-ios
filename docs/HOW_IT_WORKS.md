@@ -16,7 +16,7 @@ phone-to-phone radio that iOS lets an app keep using while the app is in the bac
 | How far does it reach? | Bluetooth range: the same room, or a few tens of metres with a clear line of sight. Walls, bodies and crowds shorten it. Earshot does not promise a distance. |
 | Are messages relayed through other phones? | No. Earshot is direct, phone to phone. It is not a mesh network. |
 | What permissions does iOS ask for? | Bluetooth, when Earshot is first switched on. Notifications, later and optionally, when there is a first contact to be notified about. Nothing else. |
-| How fast is it? | Slow by internet standards but enough for text. Expect a short message to arrive almost at once on an open link and a 2,000-character message to take a few seconds (not yet measured on hardware). |
+| How fast is it? | Slow by internet standards but enough for text and small photos. Expect a short message to arrive almost at once on an open link and a 2,000-character message to take a few seconds. Expect very roughly 5–50 KB/s depending on the phones and the direction, so a photo (about 50–150 KB once Earshot has shrunk it) takes a few seconds to about half a minute. None of these speeds has been measured between two phones yet; they are expectations. |
 
 ### Background delivery: what works and what does not
 
@@ -132,7 +132,7 @@ Every message carries a random ID. The receiving phone stores it and returns a r
 | Waiting | The contact is not connected. Sent automatically when the phones link up again. |
 | Sending | Handed to the link; no receipt yet. |
 | Delivered | The other phone confirmed it received and stored the message. (Not "read".) |
-| Not delivered | No receipt within 10 seconds on a live link (for example the other phone could not store it). Tap to retry. |
+| Not delivered | No receipt within 10 seconds on a live link (for example the other phone could not store it). Tap to retry. For photos the rule is different, see Photos below. |
 
 If a link drops with messages in flight they return to Waiting and are re-sent after
 reconnecting. The receiver ignores IDs it already has, so nothing is duplicated.
@@ -141,6 +141,170 @@ Each frame has a counter that must be exactly the next expected one; frames that
 replayed, skipped, re-ordered or modified close the link. Earshot then reconnects with
 fresh keys. A link that delivers more than 60 messages in a burst (then 5 per second) is
 closed, and a conversation keeps its most recent 5,000 messages.
+
+## Formatting (shown on screen only)
+
+Messages can carry light formatting. Nothing about it travels between phones: the raw
+text the person typed is what is stored, sent, copied and shown in notifications, so every
+Earshot version can read every message. Phones that understand formatting draw it.
+
+| Typed | Shown |
+| --- | --- |
+| `*bold*` | **bold** |
+| `_italic_` | *italic* |
+| `~struck~` | ~~struck~~ |
+| `` `code` `` | `code` (monospaced) |
+
+The rules are strict so ordinary text is never mangled (`MessageFormatting.swift`):
+
+- A marker opens only at the start of a word (after a space, punctuation or the start of
+  the text) and closes only at the end of one. `snake_case_name` and `2*3*4` stay as typed.
+- A style must open and close on the same line. Doubled markers (`**x**`) never count.
+- Inside `` `code` `` everything is literal. Other styles may nest properly
+  (`*bold _and italic_*`); if they cross, the inner one is shown as typed.
+- Any marker without a partner is shown as typed: `see *you* at https://example.com/a_b ok_`
+  shows "see **you** at", a link, and "ok_".
+
+**Links.** Web addresses, email addresses and phone numbers are found on the phone with
+Apple's `NSDataDetector` and drawn underlined. Text inside a link is never formatting, so
+`https://a.com/x_y_z` stays intact. Only `http`, `https`, `mailto` and `tel` links are ever
+opened, only when the person taps one, and always by iOS (Safari, Mail, Phone). Earshot
+never loads a link itself and never fetches previews, so it still makes no network
+requests. Long-pressing a message offers "Copy" for each link. VoiceOver reads a message
+without the markers and offers each link as an action.
+
+The conversation list and VoiceOver show messages without markers; notifications (when
+message text is turned on) show the raw text.
+
+## Photos
+
+Two connected people can send each other photos over the same encrypted link.
+
+**What happens, step by step**
+
+1. **Picking.** The photo button opens Apple's photo picker. It runs outside Earshot and
+   hands over only the one photo chosen, so Earshot asks for no photo-library permission.
+   There is no camera button yet.
+2. **Preparing** (on the sending phone, in the background, `PhotoProcessing.swift`): the
+   photo is turned upright, scaled so its long side is at most 1,280 pixels, redrawn as a
+   plain sRGB picture and saved as JPEG, stepping the quality (and then the size) down until
+   it is at most about 150 KB. Hard limit: 400 KB, otherwise the photo is refused with a
+   message. Then **every metadata block is removed from the file**: location, camera
+   model, dates, comments, editing history and colour profile. A test feeds in a photo with
+   GPS, camera, date and IPTC data and checks that none of it, nor any EXIF block, is left.
+3. **Sending.** The photo goes in 4 KB pieces inside the existing encrypted channel. The
+   receiving phone confirms each piece; the sender never has more than three unconfirmed,
+   so a text message or receipt sent meanwhile waits behind at most about 16 KB of photo,
+   never behind the whole photo. One photo per link at a time; others queue.
+4. **Checking.** The receiver writes pieces straight to a file as they come (so even in
+   the background the photo is never held in memory several times over), then checks the
+   size, the SHA-256 of the whole file, and that it really is a complete JPEG of sane size —
+   read from the file itself, never from what the sender claims, and before decoding it, so
+   a small file pretending to be 50,000 × 50,000 pixels is refused unopened.
+5. **Delivered.** Only then is the photo stored and the usual receipt sent. "Delivered" on a
+   photo means fully received, checked and saved on the other phone.
+
+**When things go wrong**
+
+| Situation | What happens |
+| --- | --- |
+| The other person is not connected | The photo button explains that photos are only sent while connected. Unlike text, a new photo is not queued for later, so the person knows it is going now. |
+| Their Earshot is an older version | The photo button explains that their Earshot can't receive photos yet. Text works as before. |
+| The link drops halfway | The receiver throws away what it has. The sender's photo goes back to "Waiting" and starts again from the beginning the next time the phones link up (restart, not resume: simpler, and the receiver never keeps half a photo). If the new link is with a phone that no longer announces photos, it is marked not delivered instead of being sent. |
+| No progress for 20 seconds on a live link | "Not delivered · The connection stalled". There is no fixed total time limit: a big photo on a slow link may take a minute and still succeed, as long as pieces keep arriving. |
+| The other phone refuses it (too big, out of photo storage, failed checks) | "Not delivered · Their phone didn't accept it". |
+| You tap ✕ while it is sending | "Cancelled"; the other phone throws its partial copy away. Tap to send it again. |
+
+**Speed (expected, not measured on phones).** The pieces travel as JSON with base64, which
+adds about a third, so a 100 KB photo is about 137 KB on the air. At 5–50 KB/s that is
+about 3–28 seconds. The composer shows a range like this for the chosen photo. The probe
+and the app log the real figure (bytes, seconds, KB/s, never content) when
+`EARSHOT_BT_DEBUG` is set, so it can be measured on hardware.
+
+**Limits.** No video: a short clip is several megabytes, which would take minutes over
+Bluetooth LE. No camera capture yet. One photo per message, with an optional caption.
+
+**Saving and sharing.** The full-screen viewer has a share button (Copy, Save to Files,
+AirDrop, other apps). "Save Image" to the photo library is deliberately not offered: iOS
+only shows it to apps that declare a photo-library "add" permission, which would bring a
+permission prompt. Verified in the Simulator.
+
+**Storage.** Each photo is one file in `Application Support/Earshot/attachments`, named
+after its message, with the same protection as the rest of Earshot's data (encrypted until
+the phone is first unlocked after a restart) and excluded from backups. Deleting the
+message, clearing the conversation, removing the contact, the 5,000-message history limit
+and "Erase everything" all delete the files. A photo half-received when the app stopped is
+deleted at the next launch, and so is any file no message points to. Received photos are
+limited to 300 MB in total; beyond that new ones are refused.
+
+**Notifications** say "Photo" (or "Photo: caption") when message text is shown, and "New
+message" otherwise, as for text. Photos arrive in the background over an open link the
+same way text does.
+
+**Hostile phones.** The receiver refuses a photo announced as larger than 1 MB before
+setting anything aside, accepts at most two photos arriving at once per link, enforces the
+storage limit, insists on pieces in order and never more bytes than announced, caps piece
+size at 16 KB, limits photo bytes per link (2 MB burst, then 1 MB/s — far above Bluetooth,
+it only stops floods over faster radios), and counts each announcement like a message
+against the existing flood limit. A blocked contact cannot link, so cannot send anything.
+
+### Photo wire format
+
+For anyone implementing a compatible client (for example the web client). All of this
+travels inside the encrypted channel as the JSON of `Payload`, exactly like text. Swift's
+`JSONEncoder` defaults are used: `Data` is standard base64 with padding, UUIDs are
+upper-case strings (any case is accepted), integers are plain JSON numbers, and an optional
+field that is absent is left out. Key order is not significant. Unknown keys are ignored.
+
+**Announcing support.** The identity proof gains an optional `features` list:
+
+```json
+{"auth":{"_0":{"identityKey":"…","name":"Alex","signature":"…","features":["photo-v1"]}}}
+```
+
+Phones before this change send no `features` key and ignore it when they receive it. Both
+the first connection and the knock-based reconnection end with both phones sending `auth`,
+so features are known on every link, and only what the current link announced is trusted.
+A phone sends the payloads below **only** to a peer whose `auth` on the current link listed
+`"photo-v1"`; an older phone cannot decode them and closes the link. A peer that does not
+list it simply never receives photos. `Handshake.version` is still 1.
+
+**Sender → receiver**
+
+```json
+{"photoStart":{"_0":{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","size":104857,"sha256":"<32 bytes, base64>",
+                     "width":1280,"height":960,"preview":"<optional JPEG ≤ 2048 bytes, base64>","caption":"optional"}}}
+{"photoPiece":{"_0":{"id":"6F9619FF-…","index":0,"data":"<bytes, base64>"}}}
+{"photoCancel":{"_0":"6F9619FF-…"}}
+```
+
+- `id` is the message ID; the final receipt is the ordinary `{"ack":{"_0":"<id>"}}`.
+- `size` is the exact number of bytes of the file; `sha256` is SHA-256 over exactly those
+  bytes (the whole JPEG file, nothing else, no length prefix).
+- `width`, `height` and `preview` are hints for a placeholder only. `caption` follows the
+  2,000-character message limit.
+- Pieces are the file's bytes in order: `index` 0, 1, 2… with no gaps or repeats. This
+  version sends 4,096 bytes per piece (the last one shorter); receivers accept 1–16,384.
+- A sender keeps at most 3 pieces unconfirmed (receivers must not rely on this).
+
+**Receiver → sender**
+
+```json
+{"photoProgress":{"_0":{"id":"6F9619FF-…","received":3}}}
+{"photoRefuse":{"_0":"6F9619FF-…"}}
+```
+
+- `received` is how many pieces are stored so far, sent after each piece. It must grow and
+  never exceed the number of pieces sent, or the sender closes the link.
+- `photoRefuse` means "I will not take this photo" (too large, storage full, too many at
+  once, hash or image check failed, gave up waiting). The sender marks it not delivered.
+- If the photo is already stored (the receipt was lost), the receiver answers `photoStart`
+  with an `ack` at once and ignores the pieces that follow.
+
+**Closing the link** (protocol violation): a malformed `photoStart` (hash not 32 bytes, size
+≤ 0, preview over 2,048 bytes, caption too long), a piece out of order, empty or over
+16,384 bytes, more bytes than announced, a second `photoStart` for the same ID on the same
+link, too many photo bytes or announcements too fast, progress beyond what was sent.
 
 ### Removing and blocking
 
@@ -182,5 +346,10 @@ closed, and a conversation keeps its most recent 5,000 messages.
 | `Live.swift` | Chooses the radio layer and builds the real `Messenger`. |
 | `LoopbackTransport.swift` | In-memory radio for tests and demo mode. |
 | `Messenger.swift` | The engine: consent, handshake, delivery, reconnection, storage. |
+| `Messenger+Photos.swift` | Sending and receiving photos: pacing, checks, timeouts, clean-up. |
+| `PhotoWire.swift` | Photo payloads, the `photo-v1` feature, and every photo limit (`PhotoLimits`). |
+| `PhotoProcessing.swift` | Shrinking and cleaning photos before sending, checking received ones, safe decoding. |
+| `AttachmentStore.swift` | Photo files on disk (or in memory for tests and demo mode). |
+| `MessageFormatting.swift` | Finds links and bold, italic, strikethrough and code markers in message text, for display. |
 | `Persistence.swift` | On-disk storage and Keychain. |
 | `DemoWorld.swift` | Simulated neighbours for previews, screenshots and UI tests (`-demo` only). |

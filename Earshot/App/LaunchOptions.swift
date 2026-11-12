@@ -13,6 +13,8 @@ import Foundation
 ///   `-simulateBluetoothDenied` shows the "Bluetooth access denied" state, and
 ///   `-demoLeave <Name>` makes a demo person walk out of range about 6 s after launch.
 ///   These exist so screenshots of inner screens and states can be taken from the command line.
+///   `-useSamplePhoto` makes the photo button attach a built-in picture instead of opening the
+///   system photo picker (which UI tests cannot drive reliably).
 struct LaunchOptions: Sendable {
     var demoScenario: DemoWorld.Scenario?
     var demoRequest = false
@@ -25,6 +27,8 @@ struct LaunchOptions: Sendable {
     var simulateBluetoothDenied = false
     /// Name of a demo person who walks out of range a few seconds after launch.
     var demoLeaver: String?
+    /// Debug builds: the photo button uses `DemoWorld.samplePhoto` instead of the system picker.
+    var useSamplePhoto = false
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
         func value(after flag: String) -> String? {
@@ -43,6 +47,7 @@ struct LaunchOptions: Sendable {
         onboardingStep = value(after: "-onboardingStep").flatMap(Int.init)
         simulateBluetoothDenied = arguments.contains("-simulateBluetoothDenied")
         demoLeaver = value(after: "-demoLeave")
+        useSamplePhoto = arguments.contains("-useSamplePhoto")
         #endif
     }
 }

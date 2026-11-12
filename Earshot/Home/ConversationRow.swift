@@ -119,8 +119,16 @@ struct ConversationRow: View {
             .background(Palette.accent, in: Capsule())
     }
 
+    /// The list shows a message as it looks in the chat: formatting markers removed,
+    /// and "Photo" for a photo (with its caption, if any).
+    static func readableText(_ message: Message) -> String {
+        let text = MessageFormatting.plainText(message.text).replacingOccurrences(of: "\n", with: " ")
+        guard message.photo != nil else { return text }
+        return text.isEmpty ? "Photo" : "Photo · \(text)"
+    }
+
     private func previewText(_ message: Message) -> String {
-        let text = message.text.replacingOccurrences(of: "\n", with: " ")
+        let text = Self.readableText(message)
         guard message.direction == .outgoing else { return text }
         switch message.status {
         case .failed: return "Not delivered: \(text)"
@@ -146,7 +154,7 @@ struct ConversationRow: View {
         }
         if let message = summary.lastMessage {
             let who = message.direction == .outgoing ? "You" : name.firstName
-            var line = "\(who): \(message.text)"
+            var line = "\(who): \(Self.readableText(message))"
             if message.direction == .outgoing {
                 switch message.status {
                 case .waiting: line += ". Waiting to send"

@@ -34,7 +34,10 @@ private struct ChatContent: View {
     @State private var viewportHeight: CGFloat = 0
     @State private var linkDroppedHere = false
     @State private var sentCount = 0
+    @State private var staged: StagedPhoto?
+    @State private var viewing: Message?
     @FocusState private var composerFocused: Bool
+    private let useSamplePhoto = LaunchOptions().useSamplePhoto
 
     private let bottomID = "chat-bottom"
     private let scrollSpace = "chat-scroll"
@@ -44,6 +47,12 @@ private struct ChatContent: View {
     private var link: LinkState { messenger.linkState(for: contact.id) }
     private var lastOutgoingID: UUID? { messages.last { $0.direction == .outgoing }?.id }
     private var lastIncomingID: UUID? { messages.last { $0.direction == .incoming }?.id }
+    private var arriving: [IncomingPhoto] { messenger.incomingPhotos[contact.id] ?? [] }
+    /// Read from observable state so the button updates the moment the link changes.
+    private var attach: AttachAvailability {
+        if messenger.photoCapableContacts.contains(contact.id) { return .available }
+        return link == .connected ? .notSupported(name: contact.displayName) : .notConnected(name: contact.displayName)
+    }
 
     var body: some View {
         // Banner, transcript and composer are stacked rather than overlaid, so the transcript's
@@ -58,9 +67,9 @@ private struct ChatContent: View {
             if contact.isBlocked {
                 BlockedFooter(contact: contact)
             } else {
-                Composer(draft: $draft,
+                Composer(draft: $draft, staged: $staged,
                          placeholder: typeSize.isAccessibilitySize ? "Message" : "Message \(contact.displayName.firstName)",
-                         focused: $composerFocused, onSend: send)
+                         focused: $composerFocused, attach: attach, useSamplePhoto: useSamplePhoto, onSend: send)
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: link)
@@ -79,6 +88,12 @@ private struct ChatContent: View {
             }
         }
         .toolbarBackground(Palette.background, for: .navigationBar)
+        .fullScreenCover(item: $viewing) { message in
+            PhotoViewer(message: message, senderName: contact.displayName) {
+                messenger.deleteMessage(message.id, in: contact.id)
+            }
+            .environment(messenger)
+        }
         .sensoryFeedback(.impact(weight: .light), trigger: sentCount)
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: lastIncomingID) { old, new in
             old != nil && new != nil
@@ -111,7 +126,7 @@ private struct ChatContent: View {
                 VStack(spacing: 0) {
                     ConversationIntro(name: contact.displayName, isVerified: contact.isVerified)
                         .padding(.bottom, 8)
-                    ForEach(ChatItem.build(from: messages)) { item in
+                    ForEach(ChatItem.build(from: messages, arriving: arriving)) { item in
                         row(item)
                     }
                     Color.clear
@@ -148,6 +163,9 @@ private struct ChatContent: View {
                 guard let last = messages.last else { return }
                 // Follow new messages if you sent it, or if you were already reading the end.
                 if last.direction == .outgoing || isAtBottom { scrollToBottom(proxy) }
+            }
+            .onChange(of: arriving.count) { old, new in
+                if new > old && isAtBottom { scrollToBottom(proxy) }
             }
             .task {
                 // The navigation bar slides in during the push (Home hides it), resizing the
@@ -214,13 +232,20 @@ private struct ChatContent: View {
                 HStack(spacing: 0) {
                     if outgoing { Spacer(minLength: typeSize.isAccessibilitySize ? 24 : 56) }
                     MessageBubble(message: message, position: position, senderName: contact.displayName,
+                                  photoSource: message.photo == nil ? nil : messenger.photoSource(for: message),
+                                  photoProgress: messenger.photoProgress[message.id],
                                   onRetry: { messenger.retry(message.id, in: contact.id) },
-                                  onDelete: { withAnimation { messenger.deleteMessage(message.id, in: contact.id) } })
+                                  onDelete: { withAnimation { messenger.deleteMessage(message.id, in: contact.id) } },
+                                  onOpenPhoto: { composerFocused = false; viewing = message },
+                                  onCancelPhoto: { messenger.cancelPhoto(message.id, in: contact.id) })
                     if !outgoing { Spacer(minLength: typeSize.isAccessibilitySize ? 24 : 56) }
                 }
                 if showStatus {
                     DeliveryStatusLine(status: message.status, contactName: contact.displayName,
                                        isLast: message.id == lastOutgoingID,
+                                       isPhoto: message.photo != nil,
+                                       progress: messenger.photoProgress[message.id],
+                                       failure: messenger.photoFailures[message.id],
                                        onRetry: { messenger.retry(message.id, in: contact.id) })
                         .padding(.horizontal, 4)
                         .padding(.bottom, 2)
@@ -230,6 +255,14 @@ private struct ChatContent: View {
             .padding(.top, position.isFirst ? 10 : 2)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: message.status)
             .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
+        case .incomingPhoto(let incoming):
+            HStack(spacing: 0) {
+                IncomingPhotoBubble(incoming: incoming, progress: messenger.photoProgress[incoming.id] ?? 0,
+                                    senderName: contact.displayName)
+                Spacer(minLength: typeSize.isAccessibilitySize ? 24 : 56)
+            }
+            .padding(.top, 10)
+            .transition(.opacity)
         }
     }
 
@@ -259,7 +292,14 @@ private struct ChatContent: View {
     }
 
     private func send() {
-        guard messenger.send(draft, to: contact.id) != nil else { return }
+        if let photo = staged?.photo {
+            // Only possible while connected to a phone that takes photos; if the link dropped a
+            // moment ago this fails, and the photo stays in the composer with the explanation.
+            guard messenger.sendPhoto(photo, caption: draft, to: contact.id) != nil else { return }
+            staged = nil
+        } else {
+            guard messenger.send(draft, to: contact.id) != nil else { return }
+        }
         draft = ""
         sentCount += 1
     }

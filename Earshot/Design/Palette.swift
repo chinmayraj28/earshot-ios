@@ -16,6 +16,11 @@ import UIKit
 /// | onBubbleOutgoing on bubbleOutgoing     | 5.4   | 5.7  |
 /// | onAccent on accent (buttons)           | 5.3   | 8.1  |
 /// | danger on surface                      | 6.3   | 7.5  |
+/// | linkOnIncoming on bubbleIncoming       | 5.7   | 6.4  |
+/// | linkOnOutgoing on bubbleOutgoing       | 5.4   | 5.7  |
+///
+/// With Increase Contrast the link pairs are 6.8/7.3 (incoming) and 8.1/8.2 (outgoing).
+/// Links are also underlined, so they never depend on colour alone.
 enum Palette {
     /// Screen background.
     static let background = dynamic(light: 0xF5EFE6, dark: 0x121110, lightHC: 0xFAF6F0, darkHC: 0x000000)
@@ -44,6 +49,11 @@ enum Palette {
     static let bubbleOutgoing = dynamic(light: 0xB0431E, dark: 0xA9401C, lightHC: 0x8E3010, darkHC: 0x8A3314)
     static let onBubbleOutgoing = dynamic(light: 0xFFF8F2, dark: 0xFFF4EC, lightHC: 0xFFFFFF, darkHC: 0xFFFFFF)
     static let bubbleIncoming = surfaceSunken
+    /// Links inside an incoming bubble. `accent` is just short of 4.5:1 on `bubbleIncoming`
+    /// in light mode (4.4), so links there use a deeper ember.
+    static let linkOnIncoming = dynamic(light: 0x9A3412, dark: 0xFF8A5C, lightHC: 0x7A2A0E, darkHC: 0xFFAE8A)
+    /// Links inside an outgoing bubble: the bubble's own text colour, underlined.
+    static let linkOnOutgoing = onBubbleOutgoing
 
     static let danger = dynamic(light: 0xB3261E, dark: 0xFF8A80, lightHC: 0x8C1D18, darkHC: 0xFFB4AB)
 

@@ -22,7 +22,7 @@ final class LiveLinkTests: XCTestCase {
         }
 
         let app = XCUIApplication()
-        app.launchArguments = ["-ephemeral"]
+        app.launchArguments = ["-ephemeral", "-useSamplePhoto"]
         app.launch()
 
         tap(app.buttons["onboarding.continue"])
@@ -49,6 +49,17 @@ final class LiveLinkTests: XCTestCase {
         let echo = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS 'Echo: Hello over the air'")).firstMatch
         XCTAssertTrue(echo.waitForExistence(timeout: 30), "The probe's reply should arrive")
+
+        // A photo each way: ours to the probe, and the probe's generated picture back.
+        tap(app.buttons["chat.attach"])
+        XCTAssertTrue(element(app, "chat.staged").waitForExistence(timeout: 10))
+        tap(app.buttons["chat.send"])
+        // The probe only answers once it has received and checked ours.
+        let reply = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Photo. Test picture'")).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 60), "The probe's photo should arrive")
+        let photoDelivered = expectation(for: NSPredicate(format: "label CONTAINS 'Delivered'"), evaluatedWith: status)
+        wait(for: [photoDelivered], timeout: 30)
     }
 
     private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {

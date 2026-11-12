@@ -29,6 +29,15 @@ public final class DemoWorld {
         "No signal here either — glad this works.",
     ]
 
+    /// A made-up landscape picture, the same on every launch, used as "the photo you picked"
+    /// in demo mode and UI tests (the system photo picker cannot be driven reliably by tests).
+    /// What a demo person sends back when asked for a photo.
+    static let samplePhoto2: PreparedPhoto? =
+        try? PhotoProcessing.prepare(.data(PhotoProcessing.sampleJPEG(width: 1200, height: 1600, seed: 2)))
+
+    public static let samplePhoto: PreparedPhoto? =
+        try? PhotoProcessing.prepare(.data(PhotoProcessing.sampleJPEG(width: 1600, height: 1200, seed: 0)))
+
     public init(scenario: Scenario = .populated, latency: Duration? = .milliseconds(90)) {
         hub = LoopbackHub(latency: latency)
 
@@ -40,6 +49,7 @@ public final class DemoWorld {
         if scenario != .firstRun {
             state.profile = Profile(displayName: "Chinmay", isVisible: true, hasCompletedOnboarding: true)
         }
+        let attachments = AttachmentStore()
         if scenario == .populated {
             let mayaContact = Contact(id: maya.contactID, displayName: "Maya Okafor", identityKey: maya.publicKey,
                                       addedAt: now.addingTimeInterval(-86_400 * 3), isVerified: true)
@@ -50,15 +60,28 @@ public final class DemoWorld {
                          _ status: DeliveryStatus = .delivered) -> Message {
                 Message(direction: direction, text: text, timestamp: now.addingTimeInterval(-minutesAgo * 60), status: status)
             }
+            // One photo already in Jonas's history, stored like a received one.
+            var photoMessage: [Message] = []
+            if let picture = try? PhotoProcessing.prepare(.data(PhotoProcessing.sampleJPEG(width: 1600, height: 1200, seed: 1))) {
+                let id = UUID()
+                let name = AttachmentStore.fileName(for: id)
+                if (try? attachments.save(picture.jpeg, as: name)) != nil {
+                    photoMessage = [Message(id: id, direction: .incoming, text: "The queue for the food trucks 😅",
+                                            timestamp: now.addingTimeInterval(-60 * 26 * 60 + 30), status: .delivered,
+                                            photo: PhotoAttachment(fileName: name, byteCount: picture.jpeg.count,
+                                                                   width: picture.width, height: picture.height))]
+                }
+            }
             state.conversations[maya.contactID] = Conversation(messages: [
                 message(.incoming, "Train's stuck in the tunnel. Zero bars.", 34),
-                message(.outgoing, "Same in carriage 4. Are you near the front?", 33),
+                message(.outgoing, "Same in carriage 4. Are you near the *front*?", 33),
                 message(.incoming, "Carriage 2. They say twenty minutes.", 31),
                 message(.outgoing, "OK. Meet on the platform by the stairs when we get in?", 30),
                 message(.incoming, "Deal. I'll wait by the stairs.", 29),
             ])
             state.conversations[jonas.contactID] = Conversation(messages: [
                 message(.incoming, "Main stage is packed, heading to the food trucks.", 60 * 26),
+            ] + photoMessage + [
                 message(.outgoing, "On my way. Save me a seat.", 60 * 26 - 2),
                 message(.outgoing, "Which truck are you at?", 60 * 25, .waiting),
             ])
@@ -66,23 +89,28 @@ public final class DemoWorld {
 
         messenger = Messenger(transport: hub.makeTransport(token: "me"),
                               persistence: InMemoryPersistence(state),
-                              identityStore: InMemoryIdentityStore(me.rawRepresentation))
+                              identityStore: InMemoryIdentityStore(me.rawRepresentation),
+                              attachments: attachments)
 
         guard scenario != .empty else { return }
         let meContact = Contact(id: me.contactID, displayName: "Chinmay", identityKey: me.publicKey)
         addBot("Maya Okafor", identity: maya, knows: scenario == .populated ? [meContact] : [], accepts: true)
-        addBot("Elena Costa", identity: Identity(), knows: [], accepts: true)
+        // Elena runs an older Earshot that cannot receive photos, so that state can be seen.
+        addBot("Elena Costa", identity: Identity(), knows: [], accepts: true, legacy: true)
         addBot("Tomás", identity: Identity(), knows: [], accepts: false)
         // Jonas is a saved contact who is not around, so he gets no bot.
     }
 
-    private func addBot(_ name: String, identity: Identity, knows contacts: [Contact], accepts: Bool) {
+    private func addBot(_ name: String, identity: Identity, knows contacts: [Contact], accepts: Bool, legacy: Bool = false) {
         let transport = hub.makeTransport(token: "bot-" + name)
         var state = PersistedState()
         state.profile = Profile(displayName: name, isVisible: true, hasCompletedOnboarding: true)
         state.contacts = contacts
+        var configuration = Messenger.Configuration()
+        configuration.legacyProtocolForTesting = legacy
         let bot = Messenger(transport: transport, persistence: InMemoryPersistence(state),
-                            identityStore: InMemoryIdentityStore(identity.rawRepresentation))
+                            identityStore: InMemoryIdentityStore(identity.rawRepresentation),
+                            configuration: configuration)
         bot.onEvent = { [weak self, weak bot] event in
             switch event {
             case .requestReceived(let request):
@@ -90,10 +118,18 @@ public final class DemoWorld {
                     try? await Task.sleep(for: .seconds(accepts ? 1.6 : 4))
                     if accepts { bot?.accept(request) } else { bot?.decline(request) }
                 }
-            case .messageReceived(let id, _):
+            case .messageReceived(let id, let message):
                 Task { @MainActor in
                     try? await Task.sleep(for: .seconds(1.8))
                     guard let self, let bot else { return }
+                    if message.photo != nil {
+                        bot.send("Got the photo, thanks! 📷", to: id)
+                        return
+                    }
+                    // Ask a demo person for a "photo" and they send one back (for trying out receiving).
+                    if message.text.localizedCaseInsensitiveContains("photo"), let picture = Self.samplePhoto2 {
+                        if bot.sendPhoto(picture, caption: "Here you go", to: id) != nil { return }
+                    }
                     let index = self.replyIndex[name, default: 0]
                     self.replyIndex[name] = index + 1
                     bot.send(Self.replies[index % Self.replies.count], to: id)

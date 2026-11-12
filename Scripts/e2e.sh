@@ -1,6 +1,7 @@
 #!/bin/bash
 # End-to-end check over a real link: the app in the iOS Simulator connects to
-# earshot-probe on this Mac, sends a message, waits for "Delivered" and for the reply.
+# earshot-probe on this Mac, sends a message, waits for "Delivered" and for the reply,
+# then sends a photo and receives one back.
 #
 #   Scripts/e2e.sh ["iPhone 17 Pro"]
 set -euo pipefail
@@ -12,7 +13,7 @@ xcodegen generate >/dev/null
 (cd EarshotKit && swift build --product earshot-probe)
 
 LOG="$(mktemp -t earshot-probe)"
-EarshotKit/.build/debug/earshot-probe --name Probe --echo >"$LOG" 2>&1 &
+EARSHOT_BT_DEBUG=1 EarshotKit/.build/debug/earshot-probe --name Probe --echo --photo-echo >"$LOG" 2>&1 &
 PROBE=$!
 trap 'kill $PROBE 2>/dev/null || true; echo "--- probe log ---"; cat "$LOG"; rm -f "$LOG"' EXIT
 

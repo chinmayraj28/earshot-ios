@@ -40,6 +40,11 @@ enum Payload: Codable, Equatable {
         var identityKey: Data
         var name: String
         var signature: Data
+        /// What this phone's Earshot can do beyond plain text, for example `["photo-v1"]`.
+        /// Optional so that older versions, which do not know the key, simply ignore it,
+        /// and so that an `auth` from an older version (no key at all) decodes as "nothing extra".
+        /// See `Feature`.
+        var features: [String]? = nil
     }
 
     struct Text: Codable, Equatable {
@@ -57,6 +62,19 @@ enum Payload: Codable, Equatable {
     case ack(UUID)
     /// The other person closed the app or switched Earshot off.
     case bye
+
+    // Photos (see `PhotoWire.swift`). Never sent to a phone whose `auth` did not list
+    // `Feature.photo`: an older Earshot cannot decode these and would close the link.
+    /// Sender → receiver: a photo is coming. Describes the whole file.
+    case photoStart(PhotoStart)
+    /// Sender → receiver: the next piece of the file, in order.
+    case photoPiece(PhotoPiece)
+    /// Receiver → sender: how many pieces have been stored so far. Paces the sender.
+    case photoProgress(PhotoProgress)
+    /// Sender → receiver: stop; throw away what you have of this photo.
+    case photoCancel(UUID)
+    /// Receiver → sender: I will not take this photo (too big, storage full, failed checks).
+    case photoRefuse(UUID)
 
     func encoded() throws -> Data { try JSONEncoder().encode(self) }
     static func decode(_ data: Data) throws -> Payload { try JSONDecoder().decode(Payload.self, from: data) }
