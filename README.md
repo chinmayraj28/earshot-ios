@@ -232,6 +232,7 @@ iPhone and starts a Bluetooth partner on the Mac for these checks.
 ## Notes
 
 Earshot is an independent project. It is not made by, affiliated with or endorsed by Apple.
+
 ## Licence
 
 Earshot is released under the [MIT Licence](LICENSE): you may use, change and share the
