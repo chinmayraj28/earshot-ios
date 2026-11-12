@@ -25,6 +25,8 @@ public enum TransportEvent: Sendable {
     case disconnected(PeerToken)
     case received(Data, from: PeerToken)
     case unavailable(TransportProblem)
+    /// The radios are usable (again), e.g. after Local Network access was granted.
+    case ready
 }
 
 /// The radio layer: finds nearby devices and moves opaque bytes between two of them.

@@ -63,11 +63,17 @@ enum Payload: Codable, Equatable {
 }
 
 /// Sent along with a connection request, before any link exists.
+///
+/// There are two kinds:
+/// - a **request** from someone new carries their chosen `name` and always shows a prompt;
+/// - a **reconnection** from a saved contact carries a `tag` (see `PairTag`) and no name.
+///   It is accepted silently when the tag checks out and dropped silently when it does not.
 struct InviteContext: Codable, Equatable {
     var v: Int = 1
-    var name: String
+    var name: String? = nil
+    /// The inviter's session number, used to settle simultaneous invitations.
     var nonce: Data
-    var tag: Data
+    var tag: Data? = nil
 
     func encoded() -> Data { (try? JSONEncoder().encode(self)) ?? Data() }
     static func decode(_ data: Data) -> InviteContext? {

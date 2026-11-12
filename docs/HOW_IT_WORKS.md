@@ -59,6 +59,12 @@ phones have Earshot open near each other.
 No prompt is shown: both people agreed the first time. Instead, the phones are stricter
 with each other:
 
+- The reconnection invitation carries **no name**. It carries a tag (`PairTag` in
+  `Crypto.swift`) computed from both identity keys and both phones' current session
+  numbers. A stranger cannot forge it. If the receiving phone does not recognise it —
+  for example because that person removed you — it is dropped silently. An automatic
+  reconnection never turns into a prompt.
+
 - Each phone first sends a **knock** (`Knock` in `Crypto.swift`): a MAC that can only be
   computed by someone who already holds *both* identity keys. Neither phone reveals its
   identity until it has seen a valid knock or a valid proof for the contact it expects.
@@ -81,15 +87,32 @@ Every message carries a random ID. The receiving phone stores it and returns a r
 | Waiting | The contact is not connected. Sent automatically on reconnect while Earshot is open. |
 | Sending | Handed to the link; no receipt yet. |
 | Delivered | The other phone confirmed it received and stored the message. (Not "read".) |
-| Not delivered | No receipt within 10 seconds on a live link. Tap to retry. |
+| Not delivered | No receipt within 10 seconds on a live link (for example the other phone could not store it). Tap to retry. |
 
 If a link drops with messages in flight they return to Waiting and are re-sent after
 reconnecting. The receiver ignores IDs it already has, so nothing is duplicated.
 
-Each frame has a counter; frames that are replayed, re-ordered or modified fail
-authentication and close the link. Earshot then reconnects with fresh keys.
+Each frame has a counter that must be exactly the next expected one; frames that are
+replayed, skipped, re-ordered or modified close the link. Earshot then reconnects with
+fresh keys. A link that delivers more than 60 messages in a burst (then 5 per second) is
+closed, and a conversation keeps its most recent 5,000 messages.
+
+### Removing and blocking
+
+- **Remove**: the contact and its messages are deleted. The other person's phone may keep
+  trying to reconnect on its own; those attempts are ignored without a prompt. Either
+  person can start again by tapping Connect, which shows the other a normal request.
+- **Block**: the contact disappears from your lists and their phone can no longer link to
+  yours. Because nothing about a person is known before a request is accepted, a blocked
+  person can still appear as a *new* request under any name; accepting it fails at the
+  identity check and no link forms. At most four unanswered requests are shown at once.
 
 ## What Earshot does not protect against
+
+- **Recorded beacons.** The tag that lets contacts recognise each other can be recorded
+  and re-broadcast later by someone else. Your phone will then try to reconnect to the
+  impostor. The attempt carries no name and fails before your identity is revealed, but
+  the fact that your phone reacted tells the impostor that you know that contact.
 
 - A compromised or unlocked phone: messages are readable in the app by whoever holds it.
 - Someone impersonating a *new* person by choosing the same name. Names are not unique;

@@ -177,6 +177,9 @@ public enum Availability: Sendable, Equatable {
 public enum Limits {
     public static let maxMessageLength = 2000
     public static let maxNameLength = 32
+    public static let maxNameBytes = 96
+    /// Oldest messages beyond this are dropped from a conversation.
+    public static let maxStoredMessages = 5000
 
     /// Cleans up a name typed by a user or received from another device.
     public static func sanitizedName(_ raw: String) -> String {
@@ -184,6 +187,9 @@ public enum Limits {
         let collapsed = String(String.UnicodeScalarView(scalars))
             .split(separator: " ", omittingEmptySubsequences: true)
             .joined(separator: " ")
-        return String(collapsed.prefix(maxNameLength))
+        var name = String(collapsed.prefix(maxNameLength))
+        // Names are also announced over Bonjour, which limits each value to 255 bytes.
+        while name.utf8.count > maxNameBytes { name.removeLast() }
+        return name
     }
 }

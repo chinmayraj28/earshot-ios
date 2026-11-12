@@ -189,7 +189,9 @@ import Testing
 
         hub.intercept = nil
         a.messenger.retry(sent.id, in: ids.aSeesB)
-        #expect(a.messenger.messages(for: ids.aSeesB).last?.status == .delivered)
+        // Frames went missing, so the link's counters no longer line up: it is rebuilt
+        // with fresh keys and the message goes through — once.
+        await waitUntil("delivered after retry") { a.messenger.messages(for: ids.aSeesB).last?.status == .delivered }
         #expect(b.messenger.messages(for: ids.bSeesA).count == 1)
     }
 
@@ -294,32 +296,35 @@ import Testing
         #expect(a.messenger.messages(for: ids.aSeesB).isEmpty)
         #expect(a.messenger.nearbyPeers.first?.contactID == nil)
 
-        // Blake still has Alex saved and reconnects automatically — Alex gets a prompt, not a silent link.
-        await waitUntil("prompt shown") { a.messenger.requests.contains { $0.state == .pending } }
+        // Blake still has Alex saved and his phone keeps trying to reconnect on its own.
+        // That must never show Alex a prompt nobody on Blake's side asked for.
+        await pause(250)
+        #expect(a.messenger.requests.isEmpty)
         #expect(a.messenger.contacts.isEmpty)
+        #expect(b.messenger.linkState(for: ids.bSeesA) != .connected)
 
-        // Accepting restores the conversation for both; Blake's side needed no prompt.
-        a.messenger.accept(try #require(a.messenger.requests.first))
-        let restored = try #require(a.messenger.contacts.first)
-        #expect(restored.identityKey == b.messenger.identityKey)
-        #expect(a.messenger.linkState(for: restored.id) == .connected)
-        #expect(b.messenger.linkState(for: ids.bSeesA) == .connected)
-        #expect(b.messenger.requests.isEmpty)
-    }
-
-    @Test func connectingToSomeoneWhoStillRemembersYouWorks() async throws {
-        let hub = LoopbackHub()
-        let a = makePhone(hub, "Alex"), b = makePhone(hub, "Blake")
-        let ids = try befriend(a, b)
-        b.messenger.stop()
-        a.messenger.removeContact(ids.aSeesB)
-        b.messenger.start()
-        // Whoever moves first — Alex tapping Connect or Blake's phone reconnecting — one link results.
-        if let peer = a.messenger.nearbyPeers.first { a.messenger.connect(to: peer) }
+        // A person tapping Connect is a real request, even while Blake's phone is retrying.
+        a.messenger.connect(to: try #require(a.messenger.nearbyPeers.first))
+        await waitUntil("Blake is asked") { b.messenger.requests.contains { $0.state == .pending } }
+        b.messenger.accept(try #require(b.messenger.requests.first { $0.state == .pending }))
         await waitUntil("linked again") {
             a.messenger.contacts.count == 1 && a.messenger.linkState(for: a.messenger.contacts[0].id) == .connected
                 && b.messenger.linkState(for: ids.bSeesA) == .connected
         }
+        #expect(a.messenger.contacts[0].identityKey == b.messenger.identityKey)
+    }
+
+    @Test func removedPersonCanAskAgainWithAPrompt() async throws {
+        let hub = LoopbackHub()
+        let a = makePhone(hub, "Alex"), b = makePhone(hub, "Blake")
+        let ids = try befriend(a, b)
+        a.messenger.removeContact(ids.aSeesB)
+        b.messenger.removeContact(ids.bSeesA)
+        b.messenger.connect(to: try #require(b.messenger.nearbyPeers.first))
+        let request = try #require(a.messenger.requests.first)
+        #expect(request.state == .pending && request.displayName == "Blake")
+        a.messenger.accept(request)
+        #expect(a.messenger.contacts.count == 1 && b.messenger.contacts.count == 1)
     }
 
     @Test func verificationAndClearingArePersisted() throws {
@@ -390,8 +395,10 @@ import Testing
         let conversation = Conversation(messages: [Message(direction: .outgoing, text: "hi 👋", status: .delivered)], unreadCount: 2)
         store.save(profile: Profile(displayName: "Alex", isVisible: false, hasCompletedOnboarding: true))
         store.save(contacts: [contact])
-        store.save(conversation: conversation, for: contact.id)
+        let saved = Confirmation()
+        store.save(conversation: conversation, for: contact.id) { saved.set($0) }
         store.flush()
+        #expect(saved.value == true)
 
         let loaded = FilePersistence(directory: directory).load()
         #expect(loaded.profile == Profile(displayName: "Alex", isVisible: false, hasCompletedOnboarding: true))
@@ -410,6 +417,36 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }
 
+    @Test func burstOfSavesWritesTheLatestStateAndConfirmsAll() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("earshot-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = FilePersistence(directory: directory)
+        let identity = Identity()
+        let contact = Contact(id: identity.contactID, displayName: "Maya", identityKey: identity.publicKey)
+        store.save(contacts: [contact])
+        var conversation = Conversation()
+        let confirmations = (0..<200).map { _ in Confirmation() }
+        for confirmation in confirmations {
+            conversation.messages.append(Message(direction: .incoming, text: "m", status: .delivered))
+            store.save(conversation: conversation, for: contact.id) { confirmation.set($0) }
+        }
+        store.flush()
+        #expect(confirmations.allSatisfy { $0.value == true })
+        #expect(FilePersistence(directory: directory).load().conversations[contact.id]?.messages.count == 200)
+    }
+
+    @Test func failedSaveIsReported() throws {
+        // A file where the storage directory should be makes every write fail.
+        let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("earshot-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        try Data("x".utf8).write(to: blocker)
+        let store = FilePersistence(directory: blocker)
+        let saved = Confirmation()
+        store.save(conversation: Conversation(), for: ContactID(rawValue: "abc")) { saved.set($0) }
+        store.flush()
+        #expect(saved.value == false)
+    }
+
     @Test func unreadableFileDoesNotCrashOrGetOverwrittenSilently() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("earshot-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -419,4 +456,11 @@ import Testing
         #expect(loaded.contacts.isEmpty)
         #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("contacts.json.unreadable").path))
     }
+}
+
+final class Confirmation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool?
+    var value: Bool? { lock.withLock { stored } }
+    func set(_ value: Bool) { lock.withLock { stored = value } }
 }

@@ -26,6 +26,8 @@ public final class MultipeerTransport: NSObject, Transport {
     private var browser: MCNearbyServiceBrowser?
     private var permissionProbe: NWBrowser?
     private var peers: [PeerToken: MCPeerID] = [:]
+    private var tokens: [MCPeerID: PeerToken] = [:]
+    private var tokenCounter = 0
     private var sessions: [PeerToken: MCSession] = [:]
     private var invitationHandlers: [PeerToken: (Bool, MCSession?) -> Void] = [:]
 
@@ -75,6 +77,7 @@ public final class MultipeerTransport: NSObject, Transport {
         }
         sessions.removeAll()
         peers.removeAll()
+        tokens.removeAll()
         localPeer = nil
     }
 
@@ -108,6 +111,20 @@ public final class MultipeerTransport: NSObject, Transport {
         replaceSession(for: peer, with: nil)
     }
 
+    /// Gives each remote device its own handle. The handle is tied to the framework's
+    /// peer object, not to the name it broadcasts, so a second device announcing the
+    /// same name cannot take over an existing peer's slot.
+    fileprivate func token(for peerID: MCPeerID) -> PeerToken {
+        if let token = tokens[peerID] { return token }
+        tokenCounter += 1
+        let token = PeerToken(rawValue: "\(peerID.displayName)#\(tokenCounter)")
+        tokens[peerID] = token
+        peers[token] = peerID
+        return token
+    }
+
+    fileprivate func knownToken(for peerID: MCPeerID) -> PeerToken? { tokens[peerID] }
+
     private func makeSession() -> MCSession? {
         guard let localPeer else { return nil }
         let session = MCSession(peer: localPeer, securityIdentity: nil, encryptionPreference: .required)
@@ -133,9 +150,14 @@ public final class MultipeerTransport: NSObject, Transport {
         let probe = NWBrowser(for: .bonjour(type: "_\(Self.serviceType)._tcp", domain: nil), using: parameters)
         probe.stateUpdateHandler = { [weak self] state in
             let policyDenied: Int32 = -65570 // kDNSServiceErr_PolicyDenied
-            guard case .waiting(let error) = state, case .dns(let code) = error, code == policyDenied else { return }
+            let event: TransportEvent
+            switch state {
+            case .waiting(.dns(let code)) where code == policyDenied: event = .unavailable(.localNetworkDenied)
+            case .ready: event = .ready
+            default: return
+            }
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.eventHandler?(.unavailable(.localNetworkDenied)) }
+                MainActor.assumeIsolated { self?.eventHandler?(event) }
             }
         }
         probe.start(queue: .main)
@@ -163,17 +185,19 @@ extension MultipeerTransport: MCNearbyServiceBrowserDelegate {
         let browser = Unchecked(value: browser), peerID = Unchecked(value: peerID)
         onMain { [weak self] in
             guard let self, self.browser === browser.value else { return }
-            let token = PeerToken(rawValue: peerID.value.displayName)
-            self.peers[token] = peerID.value
+            let token = self.token(for: peerID.value)
             self.emit(.found(token, LocalAdvertisement(displayName: name, nonce: nonce, tag: tag, isVisible: true)))
         }
     }
 
     public nonisolated func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
-        let browser = Unchecked(value: browser), token = PeerToken(rawValue: peerID.displayName)
+        let browser = Unchecked(value: browser), peerID = Unchecked(value: peerID)
         onMain { [weak self] in
-            guard let self, self.browser === browser.value else { return }
-            if self.sessions[token] == nil { self.peers[token] = nil }
+            guard let self, self.browser === browser.value, let token = self.knownToken(for: peerID.value) else { return }
+            if self.sessions[token] == nil, self.invitationHandlers[token] == nil {
+                self.peers[token] = nil
+                self.tokens[peerID.value] = nil
+            }
             self.emit(.lost(token))
         }
     }
@@ -195,9 +219,8 @@ extension MultipeerTransport: MCNearbyServiceAdvertiserDelegate {
                 handler.value(false, nil)
                 return
             }
-            let token = PeerToken(rawValue: peerID.value.displayName)
+            let token = self.token(for: peerID.value)
             self.invitationHandlers.removeValue(forKey: token)?(false, nil)
-            self.peers[token] = peerID.value
             self.invitationHandlers[token] = handler.value
             self.emit(.invited(by: token, context: context ?? Data()))
         }
@@ -211,9 +234,10 @@ extension MultipeerTransport: MCNearbyServiceAdvertiserDelegate {
 
 extension MultipeerTransport: MCSessionDelegate {
     public nonisolated func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        let session = Unchecked(value: session), token = PeerToken(rawValue: peerID.displayName)
+        let session = Unchecked(value: session), peerID = Unchecked(value: peerID)
         onMain { [weak self] in
-            guard let self, self.sessions[token] === session.value else { return }
+            guard let self, let token = self.knownToken(for: peerID.value),
+                  self.sessions[token] === session.value else { return }
             switch state {
             case .connected:
                 self.emit(.connected(token))
@@ -230,9 +254,10 @@ extension MultipeerTransport: MCSessionDelegate {
     }
 
     public nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        let session = Unchecked(value: session), token = PeerToken(rawValue: peerID.displayName)
+        let session = Unchecked(value: session), peerID = Unchecked(value: peerID)
         onMain { [weak self] in
-            guard let self, self.sessions[token] === session.value else { return }
+            guard let self, let token = self.knownToken(for: peerID.value),
+                  self.sessions[token] === session.value else { return }
             self.emit(.received(data, from: token))
         }
     }

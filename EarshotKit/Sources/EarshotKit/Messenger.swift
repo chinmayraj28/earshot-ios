@@ -26,7 +26,14 @@ public final class Messenger {
         /// When two phones could both start a link, the one with the higher
         /// random number holds back this long so they do not collide.
         public var tieBreakDelay: Duration = .seconds(3)
+        /// After those, a contact that is still in range is retried at this slower pace for as long as it stays.
+        public var steadyRetryDelay: Duration = .seconds(30)
         public var maxLinks = 6
+        /// More unanswered requests than this are dropped without a prompt.
+        public var maxPendingRequests = 4
+        /// A link may deliver this many messages in a burst, then `incomingRate` per second.
+        public var incomingBurst = 60.0
+        public var incomingRate = 5.0
 
         public init() {}
     }
@@ -70,6 +77,9 @@ public final class Messenger {
         var channel: SecureChannel?
         /// Whether this phone has revealed its identity on this link yet.
         var authSent = false
+        /// Allowance for incoming messages; refills over time. Stops a flood from one link.
+        var incomingBudget = 0.0
+        var budgetUpdated = ContinuousClock.now
 
         var contactID: ContactID? {
             if case .established(let id) = phase { return id }
@@ -84,6 +94,7 @@ public final class Messenger {
         var tag: Data
         var contactID: ContactID?
         var isBlocked = false
+        var foundAt = ContinuousClock.now
     }
 
     private enum LinkFailure: Error {
@@ -101,6 +112,11 @@ public final class Messenger {
     @ObservationIgnored private let identityStore: IdentityStore
     @ObservationIgnored private let configuration: Configuration
     @ObservationIgnored private var identity: Identity
+    /// False when the Keychain could not be read; the identity is then temporary and retried on `start()`.
+    @ObservationIgnored private var identityIsStored: Bool
+    /// Bumped whenever everything is torn down, so timers from before then do nothing.
+    @ObservationIgnored private var epoch = 0
+    @ObservationIgnored private var inviteSerials: [PeerToken: Int] = [:]
     @ObservationIgnored private var links: [PeerToken: Link] = [:]
     @ObservationIgnored private var discovered: [PeerToken: Discovered] = [:]
     @ObservationIgnored private var refusedTokens: Set<PeerToken> = []
@@ -117,12 +133,9 @@ public final class Messenger {
         self.identityStore = identityStore
         self.configuration = configuration
 
-        if let raw = identityStore.load(), let stored = try? Identity(rawRepresentation: raw) {
-            identity = stored
-        } else {
-            identity = Identity()
-            identityStore.save(identity.rawRepresentation)
-        }
+        let loaded = Self.loadIdentity(from: identityStore)
+        identity = loaded.identity
+        identityIsStored = loaded.stored
 
         let state = persistence.load()
         profile = state.profile
@@ -138,9 +151,26 @@ public final class Messenger {
         transport.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
+    /// Loads the stored identity, or creates one on first launch. If the store cannot be
+    /// read or written right now, returns a throwaway identity and `stored == false` —
+    /// the real key is never overwritten because of a temporary failure.
+    private static func loadIdentity(from store: IdentityStore) -> (identity: Identity, stored: Bool) {
+        do {
+            if let raw = try store.load() { return (try Identity(rawRepresentation: raw), true) }
+            let fresh = Identity()
+            try store.save(fresh.rawRepresentation)
+            return (fresh, true)
+        } catch {
+            return (Identity(), false)
+        }
+    }
+
     // MARK: Reading state
 
     public var identityKey: Data { identity.publicKey }
+
+    /// This session's random number, exposed for tests only.
+    var currentNonceForTesting: Data? { availability == .on ? localNonce : nil }
 
     public func contact(_ id: ContactID) -> Contact? { contacts.first { $0.id == id } }
 
@@ -193,6 +223,15 @@ public final class Messenger {
     public func start() {
         guard availability != .on, !profile.displayName.isEmpty else { return }
         if availability != .off { transport.stop() }
+        if !identityIsStored {
+            let loaded = Self.loadIdentity(from: identityStore)
+            guard loaded.stored else {
+                availability = .unavailable(.failedToStart("Earshot could not read this phone's identity key. Unlock the phone and reopen Earshot."))
+                return
+            }
+            identity = loaded.identity
+            identityIsStored = true
+        }
         localNonce = DiscoveryTag.makeNonce()
         localTag = DiscoveryTag.make(identityKey: identity.publicKey, nonce: localNonce)
         availability = .on
@@ -208,6 +247,15 @@ public final class Messenger {
             try? send(.bye, to: token)
         }
         transport.stop()
+        tearDown()
+        availability = .off
+        refresh()
+        persistence.flush()
+    }
+
+    /// Forgets every link, nearby device and request, and cancels all running timers.
+    private func tearDown() {
+        epoch += 1
         let open = links.values.compactMap(\.contactID)
         links.removeAll()
         discovered.removeAll()
@@ -215,9 +263,6 @@ public final class Messenger {
         reconnectAttempts.removeAll()
         requests.removeAll()
         open.forEach(parkUnconfirmedMessages)
-        availability = .off
-        refresh()
-        persistence.flush()
     }
 
     private func restartIfRunning() {
@@ -293,9 +338,12 @@ public final class Messenger {
         let message = Message(direction: .outgoing, text: trimmed, status: .waiting)
         conversations[id, default: Conversation()].messages.append(message)
         knownMessageIDs[id, default: []].insert(message.id)
+        trimHistory(id)
         transmit(message.id, to: id)
         persist(id)
-        return conversations[id]?.messages.last
+        // In range but not linked (for example after several failed attempts): try again now.
+        if link(to: id) == nil { autoConnect(id) }
+        return conversations[id]?.messages.first { $0.id == message.id }
     }
 
     /// Tries a failed message again.
@@ -364,7 +412,7 @@ public final class Messenger {
         identityStore.delete()
         persistence.eraseAll()
         identity = Identity()
-        identityStore.save(identity.rawRepresentation)
+        identityIsStored = (try? identityStore.save(identity.rawRepresentation)) != nil
         profile = Profile()
         contacts = []
         conversations = [:]
@@ -385,12 +433,13 @@ public final class Messenger {
         case .received(let data, let token): frameReceived(data, from: token)
         case .unavailable(let problem):
             guard availability == .on else { return }
-            let open = links.values.compactMap(\.contactID)
-            links.removeAll()
-            discovered.removeAll()
-            requests.removeAll()
-            open.forEach(parkUnconfirmedMessages)
+            // Without Local Network access no link can exist, and the transport keeps
+            // watching for the permission to be granted. Any other failure shuts it down.
+            if problem != .localNetworkDenied { transport.stop() }
+            tearDown()
             availability = .unavailable(problem)
+        case .ready:
+            if availability == .unavailable(.localNetworkDenied) { start() }
         }
         refresh()
     }
@@ -437,68 +486,100 @@ public final class Messenger {
     private func autoConnect(_ id: ContactID) {
         guard availability == .on, link(to: id) == nil, links.count < configuration.maxLinks,
               let contact = contact(id), !contact.isBlocked,
-              let found = discovered.values.first(where: { $0.contactID == id && !refusedTokens.contains($0.token) })
+              // A contact who reopened Earshot can briefly appear twice; the newest sighting is the live one.
+              let found = discovered.values.filter({ $0.contactID == id && !refusedTokens.contains($0.token) })
+                  .max(by: { $0.foundAt < $1.foundAt })
         else { return }
         invite(found, userInitiated: false)
         refresh()
     }
 
     private func invite(_ found: Discovered, userInitiated: Bool) {
-        links[found.token] = Link(token: found.token, role: .inviter, expected: found.contactID, userInitiated: userInitiated)
-        let context = InviteContext(name: profile.displayName, nonce: localNonce, tag: localTag)
+        let link = Link(token: found.token, role: .inviter, expected: found.contactID, userInitiated: userInitiated)
+        links[found.token] = link
+        var context = InviteContext(nonce: localNonce)
+        if let contact = found.contactID.flatMap(contact) {
+            // Reconnecting: no name, just a tag only this contact can check.
+            context.tag = PairTag.make(identity.publicKey, contact.identityKey,
+                                       inviterNonce: localNonce, inviteeNonce: found.nonce)
+        } else {
+            context.name = profile.displayName
+        }
         transport.invite(found.token, context: context.encoded(), timeout: configuration.inviteTimeout)
+        // The radio layer should report an unanswered invitation itself; this is the backstop.
+        let id = link.id, token = found.token
+        after(.seconds(configuration.inviteTimeout + 5)) { messenger in
+            guard let current = messenger.links[token], current.id == id, case .connecting = current.phase else { return }
+            messenger.drop(token, because: .timedOut)
+            messenger.refresh()
+        }
     }
 
     private func invitationReceived(from token: PeerToken, context: Data) {
-        guard availability == .on, let invite = InviteContext.decode(context), invite.v == 1 else {
-            transport.respondToInvitation(from: token, accept: false)
-            return
-        }
-        let name = Limits.sanitizedName(invite.name)
-        let known = recognise(nonce: invite.nonce, tag: invite.tag)
-        if known?.isBlocked == true || refusedTokens.contains(token) || name.isEmpty {
-            transport.respondToInvitation(from: token, accept: false)
-            return
-        }
-
-        if let existing = links[token] {
-            // Both phones asked at the same moment. Exactly one request survives.
-            guard case .connecting = existing.phase, existing.role == .inviter else {
-                transport.respondToInvitation(from: token, accept: false)
-                return
-            }
-            if localNonce.lexicographicallyPrecedes(invite.nonce) {
-                // Ours wins. Theirs is answered late so it cannot knock ours over.
-                after(.seconds(5)) { $0.transport.respondToInvitation(from: token, accept: false) }
-            } else {
-                let link = Link(token: token, role: .invitee, expected: known?.id ?? existing.expected,
-                                userInitiated: existing.userInitiated)
-                links[token] = link
-                transport.respondToInvitation(from: token, accept: true)
-                watchHandshake(link)
-            }
-            return
-        }
-
-        if let known {
-            guard links.count < configuration.maxLinks else {
-                transport.respondToInvitation(from: token, accept: false)
-                return
-            }
-            // A saved contact: no prompt. They still have to prove their identity
-            // inside the encrypted channel before anything is exchanged.
-            let link = Link(token: token, role: .invitee, expected: known.id, userInitiated: false)
+        inviteSerials[token, default: 0] += 1
+        let serial = inviteSerials[token]
+        func decline() { transport.respondToInvitation(from: token, accept: false) }
+        func acceptAsInvitee(expected: ContactID?, userInitiated: Bool) {
+            let link = Link(token: token, role: .invitee, expected: expected, userInitiated: userInitiated)
             links[token] = link
             transport.respondToInvitation(from: token, accept: true)
             watchHandshake(link)
+        }
+
+        guard availability == .on, let invite = InviteContext.decode(context), invite.v == 1,
+              invite.nonce.count == DiscoveryTag.nonceLength, !refusedTokens.contains(token) else { return decline() }
+
+        var known: Contact?
+        var name = ""
+        if let tag = invite.tag {
+            // An automatic reconnection. It never becomes a prompt: either the tag proves
+            // it comes from a saved, unblocked contact, or it is dropped without a trace.
+            known = contacts.first {
+                PairTag.make(identity.publicKey, $0.identityKey, inviterNonce: invite.nonce, inviteeNonce: localNonce) == tag
+            }
+            guard let known, !known.isBlocked else { return decline() }
         } else {
+            name = Limits.sanitizedName(invite.name ?? "")
+            guard !name.isEmpty else { return decline() }
+        }
+
+        if let existing = links[token] {
+            guard case .connecting = existing.phase, existing.role == .inviter else { return decline() }
+            if known == nil, !existing.userInitiated {
+                // Our phone was reconnecting on its own while a person on theirs sent a
+                // request. The person's request matters more: withdraw ours and show theirs.
+                links[token] = nil
+                transport.disconnect(token)
+            } else if localNonce.lexicographicallyPrecedes(invite.nonce) {
+                // Both asked at the same moment and ours wins. Theirs is answered late so
+                // that answering it cannot knock ours over.
+                after(.seconds(5)) { messenger in
+                    guard messenger.inviteSerials[token] == serial else { return }
+                    messenger.transport.respondToInvitation(from: token, accept: false)
+                }
+                return
+            } else {
+                return acceptAsInvitee(expected: known?.id ?? existing.expected, userInitiated: existing.userInitiated)
+            }
+        }
+
+        if let known {
+            // One attempt per contact at a time. An already working link is replaced
+            // only once the new one has proven itself (see `establish`).
+            let pending = links.values.contains { $0.expected == known.id && $0.contactID == nil }
+            guard !pending, links.count < configuration.maxLinks else { return decline() }
+            acceptAsInvitee(expected: known.id, userInitiated: false)
+        } else {
+            let waiting = requests.filter { $0.direction == .incoming && $0.state == .pending && $0.id != token }.count
+            guard waiting < configuration.maxPendingRequests else { return decline() }
             requests.removeAll { $0.id == token }
             let request = ConnectionRequest(id: token, direction: .incoming, displayName: name, state: .pending)
             requests.append(request)
             onEvent?(.requestReceived(request))
             // The other phone gives up after `inviteTimeout`; stop offering Accept shortly before.
             after(.seconds(max(configuration.inviteTimeout - 3, 1))) { messenger in
-                guard let index = messenger.requests.firstIndex(where: { $0.id == token && $0.state == .pending }) else { return }
+                guard messenger.inviteSerials[token] == serial,
+                      let index = messenger.requests.firstIndex(where: { $0.id == token && $0.state == .pending }) else { return }
                 messenger.requests.remove(at: index)
                 messenger.transport.respondToInvitation(from: token, accept: false)
             }
@@ -589,16 +670,34 @@ public final class Messenger {
 
         case (.text(let text), .established(let id)):
             guard text.text.count <= Limits.maxMessageLength, !text.text.isEmpty else { throw LinkFailure.protocolViolation }
-            if knownMessageIDs[id]?.contains(text.id) != true {
-                let message = Message(id: text.id, direction: .incoming, text: text.text, status: .delivered)
-                conversations[id, default: Conversation()].messages.append(message)
-                knownMessageIDs[id, default: []].insert(text.id)
-                if activeConversation != id { conversations[id]?.unreadCount += 1 }
-                persist(id)
-                onEvent?(.messageReceived(id, message))
+            try chargeIncomingMessage(on: token)
+            if knownMessageIDs[id]?.contains(text.id) == true {
+                // A repeat: the first receipt may have been lost, so confirm again.
+                try send(.ack(text.id), to: token)
+                return
             }
-            // Always confirm, even for a repeat: the first receipt may have been lost.
-            try send(.ack(text.id), to: token)
+            let message = Message(id: text.id, direction: .incoming, text: text.text, status: .delivered)
+            conversations[id, default: Conversation()].messages.append(message)
+            knownMessageIDs[id, default: []].insert(text.id)
+            trimHistory(id)
+            if activeConversation != id { conversations[id]?.unreadCount += 1 }
+            onEvent?(.messageReceived(id, message))
+
+            // "Delivered" means stored. The receipt goes out only once the save has succeeded.
+            guard let conversation = conversations[id] else { return }
+            let linkID = link.id, messageID = text.id
+            persistence.save(conversation: conversation, for: id) { [weak self] stored in
+                guard stored else { return }
+                let confirm: @MainActor @Sendable () -> Void = {
+                    guard let self, self.links[token]?.id == linkID else { return }
+                    try? self.send(.ack(messageID), to: token)
+                }
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated(confirm)
+                } else {
+                    DispatchQueue.main.async { MainActor.assumeIsolated(confirm) }
+                }
+            }
 
         case (.ack(let messageID), .established(let id)):
             if let message = messages(for: id).first(where: { $0.id == messageID }),
@@ -637,8 +736,8 @@ public final class Messenger {
             persist(id)
         }
 
-        // Keep one link per contact; the newest wins.
-        for (other, stale) in links where other != token && stale.contactID == id {
+        // Keep one link per contact; the newest wins. That includes attempts still in progress.
+        for (other, stale) in links where other != token && (stale.contactID == id || stale.expected == id) {
             links[other] = nil
             transport.disconnect(other)
         }
@@ -649,6 +748,8 @@ public final class Messenger {
             link = updated
         }
         link.phase = .established(id)
+        link.incomingBudget = configuration.incomingBurst
+        link.budgetUpdated = .now
         links[token] = link
         discovered[token]?.contactID = id
         reconnectAttempts[id] = 0
@@ -685,11 +786,11 @@ public final class Messenger {
         }
         updateRequest(link.token) { request in
             guard request.state == .waiting || request.state == .connecting else { return }
+            let unanswered = request.state == .waiting && (failure == nil || failure == .timedOut)
             switch failure {
             case .verificationFailed, .refused: request.state = .failed(.verificationFailed)
             case .incompatibleVersion: request.state = .failed(.incompatibleVersion)
-            case .none where request.state == .waiting: request.state = .failed(.noAnswer)
-            default: request.state = .failed(.connectionLost)
+            default: request.state = .failed(unanswered ? .noAnswer : .connectionLost)
             }
         }
         if !link.userInitiated, let expected = link.expected, failure != .verificationFailed, failure != .refused {
@@ -698,15 +799,24 @@ public final class Messenger {
     }
 
     private func scheduleReconnect(_ id: ContactID) {
+        guard availability == .on else { return }
         let attempt = reconnectAttempts[id, default: 0]
-        guard availability == .on, attempt < configuration.reconnectDelays.count else { return }
         reconnectAttempts[id] = attempt + 1
-        var delay = configuration.reconnectDelays[attempt]
+        // A few quick attempts, then a slow steady pace for as long as the contact stays in range.
+        var delay = attempt < configuration.reconnectDelays.count
+            ? configuration.reconnectDelays[attempt] : configuration.steadyRetryDelay
         if let found = discovered.values.first(where: { $0.contactID == id }),
            !localNonce.lexicographicallyPrecedes(found.nonce) {
             delay += configuration.tieBreakDelay
         }
-        after(delay) { $0.autoConnect(id) }
+        after(delay) { messenger in
+            messenger.autoConnect(id)
+            // If nothing could be started (for example every link slot is busy), keep the retry alive.
+            let inRange = messenger.discovered.values.contains {
+                $0.contactID == id && !$0.isBlocked && !messenger.refusedTokens.contains($0.token)
+            }
+            if messenger.link(to: id) == nil, inRange { messenger.scheduleReconnect(id) }
+        }
     }
 
     /// Messages that were on their way when a link dropped go back to "waiting"
@@ -758,8 +868,29 @@ public final class Messenger {
                 messenger.persist(id)
             }
         } catch {
-            setStatus(.failed, of: messageID, in: id)
+            // The link is gone but we have not been told yet. Park the message and let
+            // the normal reconnection path send it again.
+            setStatus(.waiting, of: messageID, in: id)
+            drop(link.token, because: .protocolViolation)
         }
+    }
+
+    /// Enforces the per-link allowance for incoming messages.
+    private func chargeIncomingMessage(on token: PeerToken) throws {
+        guard var link = links[token] else { return }
+        let now = ContinuousClock.now
+        let elapsed = Double((now - link.budgetUpdated).components.seconds)
+            + Double((now - link.budgetUpdated).components.attoseconds) / 1e18
+        link.incomingBudget = min(configuration.incomingBurst, link.incomingBudget + elapsed * configuration.incomingRate)
+        link.budgetUpdated = now
+        guard link.incomingBudget >= 1 else { throw LinkFailure.protocolViolation }
+        link.incomingBudget -= 1
+        links[token] = link
+    }
+
+    private func trimHistory(_ id: ContactID) {
+        guard let count = conversations[id]?.messages.count, count > Limits.maxStoredMessages else { return }
+        conversations[id]?.messages.removeFirst(count - Limits.maxStoredMessages)
     }
 
     private func setStatus(_ status: DeliveryStatus, of messageID: UUID, in id: ContactID) {
@@ -771,7 +902,7 @@ public final class Messenger {
 
     private func persist(_ id: ContactID) {
         guard let conversation = conversations[id] else { return }
-        persistence.save(conversation: conversation, for: id)
+        persistence.save(conversation: conversation, for: id, completion: nil)
     }
 
     private func updateRequest(_ token: PeerToken, _ change: (inout ConnectionRequest) -> Void) {
@@ -780,9 +911,10 @@ public final class Messenger {
     }
 
     private func after(_ delay: Duration, _ action: @escaping @MainActor (Messenger) -> Void) {
+        let epoch = epoch
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
-            guard let self else { return }
+            guard let self, self.epoch == epoch else { return }
             action(self)
         }
     }

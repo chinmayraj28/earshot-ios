@@ -38,6 +38,31 @@ import Testing
         #expect(throws: CryptoError.replayed) { try b.open(frame) }
     }
 
+    @Test func skippedOrOutOfRangeCountersAreRejectedWithoutCrashing() throws {
+        var (a, b) = try channels()
+        let first = try a.seal(Data("one".utf8))
+        let second = try a.seal(Data("two".utf8))
+        // A gap is not allowed: frames must arrive in order.
+        #expect(throws: CryptoError.replayed) { try b.open(second) }
+        #expect(try b.open(first) == Data("one".utf8))
+        // A frame claiming the highest possible counter must be refused, not crash the app.
+        var forged = second
+        forged.replaceSubrange(0..<8, with: Data(repeating: 0xFF, count: 8))
+        #expect(throws: CryptoError.replayed) { try b.open(forged) }
+        #expect(try b.open(second) == Data("two".utf8))
+    }
+
+    @Test func pairTagNeedsBothKeysAndBothSessionNumbers() {
+        let a = Identity().publicKey, b = Identity().publicKey, c = Identity().publicKey
+        let n1 = DiscoveryTag.makeNonce(), n2 = DiscoveryTag.makeNonce(), n3 = DiscoveryTag.makeNonce()
+        let tag = PairTag.make(a, b, inviterNonce: n1, inviteeNonce: n2)
+        #expect(tag.count == PairTag.length)
+        #expect(tag == PairTag.make(b, a, inviterNonce: n1, inviteeNonce: n2))
+        #expect(tag != PairTag.make(a, c, inviterNonce: n1, inviteeNonce: n2))
+        #expect(tag != PairTag.make(a, b, inviterNonce: n1, inviteeNonce: n3))
+        #expect(tag != PairTag.make(a, b, inviterNonce: n2, inviteeNonce: n1))
+    }
+
     @Test func frameCannotBeReflectedBackToSender() throws {
         var (a, _) = try channels()
         let frame = try a.seal(Data("hello".utf8))

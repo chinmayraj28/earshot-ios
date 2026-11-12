@@ -68,6 +68,29 @@ enum DiscoveryTag {
     }
 }
 
+/// Secrets shared by exactly two contacts: computed from both identity public keys,
+/// which only the two phones (having exchanged them inside an encrypted link) hold together.
+enum PairSecret {
+    static func key(_ a: Data, _ b: Data, purpose: String) -> SymmetricKey {
+        let (low, high) = a.lexicographicallyPrecedes(b) ? (a, b) : (b, a)
+        return SymmetricKey(data: SHA256.hash(data: Data(purpose.utf8) + low + high))
+    }
+}
+
+/// Marks an automatic reconnection invitation as coming from a saved contact.
+///
+/// It is a MAC over both phones' current session numbers, keyed with both identity
+/// keys. A stranger cannot forge it, it names nobody, and a recorded one is useless
+/// once the invited phone has restarted Earshot (its session number changes).
+enum PairTag {
+    static let length = 16
+
+    static func make(_ a: Data, _ b: Data, inviterNonce: Data, inviteeNonce: Data) -> Data {
+        let key = PairSecret.key(a, b, purpose: "earshot-pair-v1")
+        return Data(Data(HMAC<SHA256>.authenticationCode(for: inviterNonce + inviteeNonce, using: key)).prefix(length))
+    }
+}
+
 /// A "knock" lets two saved contacts confirm they already know each other before
 /// either one reveals who it is.
 ///
@@ -77,9 +100,7 @@ enum DiscoveryTag {
 /// can produce it — and to anyone else it is just random bytes.
 enum Knock {
     static func make(ownIdentityKey: Data, peerIdentityKey: Data, signerEphemeral: Data, peerEphemeral: Data) -> Data {
-        let (low, high) = ownIdentityKey.lexicographicallyPrecedes(peerIdentityKey)
-            ? (ownIdentityKey, peerIdentityKey) : (peerIdentityKey, ownIdentityKey)
-        let key = SymmetricKey(data: SHA256.hash(data: Data("earshot-knock-v1".utf8) + low + high))
+        let key = PairSecret.key(ownIdentityKey, peerIdentityKey, purpose: "earshot-knock-v1")
         let transcript = Handshake.transcript(signerEphemeral: signerEphemeral, peerEphemeral: peerEphemeral)
         return Data(HMAC<SHA256>.authenticationCode(for: transcript, using: key))
     }
@@ -158,7 +179,10 @@ struct SecureChannel {
         let frame = Data(frame)
         guard frame.count >= 8 + 16 else { throw CryptoError.malformed }
         let counter = frame.prefix(8).reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
-        guard counter >= nextReceiveCounter else { throw CryptoError.replayed }
+        // The link delivers frames in order, so the only valid counter is the next one.
+        // Anything else is a replay, a gap or a forgery — and `.max` must never be accepted,
+        // because there is no counter after it.
+        guard counter == nextReceiveCounter, counter < .max else { throw CryptoError.replayed }
         let box = try ChaChaPoly.SealedBox(nonce: Self.nonce(counter),
                                            ciphertext: frame.dropFirst(8).dropLast(16),
                                            tag: frame.suffix(16))

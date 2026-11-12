@@ -20,16 +20,18 @@ extension Messenger.Configuration {
         c.inviteTimeout = 4
         c.reconnectDelays = [.milliseconds(20), .milliseconds(20), .milliseconds(20)]
         c.tieBreakDelay = .milliseconds(40)
+        c.steadyRetryDelay = .milliseconds(80)
         return c
     }
 }
 
 @MainActor
 func makePhone(_ hub: LoopbackHub, _ name: String, persistence: InMemoryPersistence = InMemoryPersistence(),
-               identityStore: InMemoryIdentityStore = InMemoryIdentityStore(), start: Bool = true) -> Phone {
+               identityStore: InMemoryIdentityStore = InMemoryIdentityStore(), start: Bool = true,
+               configuration: Messenger.Configuration = .fast) -> Phone {
     let transport = hub.makeTransport(token: name.lowercased() + "-" + UUID().uuidString.prefix(4))
     let messenger = Messenger(transport: transport, persistence: persistence, identityStore: identityStore,
-                              configuration: .fast)
+                              configuration: configuration)
     messenger.completeOnboarding(displayName: name)
     if start { messenger.start() }
     return Phone(messenger: messenger, transport: transport, persistence: persistence, identityStore: identityStore)
