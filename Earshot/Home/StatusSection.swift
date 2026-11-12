@@ -22,7 +22,7 @@ struct StatusSection: View {
     }
 }
 
-/// "Earshot" with the rings mark, Settings, and "Listening nearby · Visible as Alex"
+/// "Earshot" with the rings mark, Settings, and "Listening nearby · Visible as Chinmay"
 /// (or the hidden state with a way back).
 private struct HomeHeader: View {
     @Environment(Messenger.self) private var messenger

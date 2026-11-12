@@ -38,7 +38,7 @@ public final class DemoWorld {
         let now = Date()
 
         if scenario != .firstRun {
-            state.profile = Profile(displayName: "Alex", isVisible: true, hasCompletedOnboarding: true)
+            state.profile = Profile(displayName: "Chinmay", isVisible: true, hasCompletedOnboarding: true)
         }
         if scenario == .populated {
             let mayaContact = Contact(id: maya.contactID, displayName: "Maya Okafor", identityKey: maya.publicKey,
@@ -69,7 +69,7 @@ public final class DemoWorld {
                               identityStore: InMemoryIdentityStore(me.rawRepresentation))
 
         guard scenario != .empty else { return }
-        let meContact = Contact(id: me.contactID, displayName: "Alex", identityKey: me.publicKey)
+        let meContact = Contact(id: me.contactID, displayName: "Chinmay", identityKey: me.publicKey)
         addBot("Maya Okafor", identity: maya, knows: scenario == .populated ? [meContact] : [], accepts: true)
         addBot("Priya Raman", identity: Identity(), knows: [], accepts: true)
         addBot("Tomás", identity: Identity(), knows: [], accepts: false)

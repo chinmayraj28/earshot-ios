@@ -98,7 +98,7 @@ export class DemoEngine extends EngineState {
     this.resetState();
     this.#links.clear();
     if (scenario === "firstRun") return;
-    this.profile = { displayName: "Alex", hasCompletedOnboarding: true };
+    this.profile = { displayName: "Chinmay", hasCompletedOnboarding: true };
     if (scenario === "empty") return;
     const now = this.now();
     this.#addSeeded(10, "Maya Okafor", "connected", { verified: true }, now, [

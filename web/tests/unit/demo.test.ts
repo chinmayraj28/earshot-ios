@@ -14,7 +14,7 @@ describe("demo engine", () => {
     await first.ready();
     expect(first.getSnapshot().profile).toEqual({ displayName: "", hasCompletedOnboarding: false });
     const empty = createDemoEngine("empty");
-    expect(empty.getSnapshot().profile.displayName).toBe("Alex");
+    expect(empty.getSnapshot().profile.displayName).toBe("Chinmay");
     expect(empty.getSnapshot().contacts).toEqual([]);
     const populated = createDemoEngine("populated").getSnapshot();
     expect(populated.availability).toBe("ready");

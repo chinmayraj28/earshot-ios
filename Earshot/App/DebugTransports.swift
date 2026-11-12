@@ -23,7 +23,7 @@ final class DeniedTransport: Transport {
     func disconnect(_ peer: PeerToken) {}
 
     static func messenger() -> Messenger {
-        let state = PersistedState(profile: Profile(displayName: "Alex", isVisible: true, hasCompletedOnboarding: true))
+        let state = PersistedState(profile: Profile(displayName: "Chinmay", isVisible: true, hasCompletedOnboarding: true))
         return Messenger(transport: DeniedTransport(), persistence: InMemoryPersistence(state),
                          identityStore: InMemoryIdentityStore())
     }
