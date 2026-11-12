@@ -10,7 +10,14 @@ let package = Package(
     ],
     targets: [
         .target(name: "EarshotKit"),
-        .executableTarget(name: "EarshotProbe", dependencies: ["EarshotKit"]),
+        .executableTarget(
+            name: "EarshotProbe",
+            dependencies: ["EarshotKit"],
+            exclude: ["Info.plist"],
+            // macOS only lets a command-line tool use Bluetooth if it carries a usage description.
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist",
+                                           "-Xlinker", "Sources/EarshotProbe/Info.plist"])]
+        ),
         .testTarget(name: "EarshotKitTests", dependencies: ["EarshotKit"]),
     ]
 )

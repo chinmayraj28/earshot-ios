@@ -160,10 +160,25 @@ public struct Profile: Codable, Sendable, Equatable {
 }
 
 public enum TransportProblem: Sendable, Equatable {
-    /// The user has not allowed Local Network access in Settings.
+    /// The user has not allowed Local Network access in Settings (Simulator and Mac only).
     case localNetworkDenied
+    /// Bluetooth is switched off.
+    case bluetoothOff
+    /// The user has not allowed Earshot to use Bluetooth.
+    case bluetoothDenied
+    /// This device has no usable Bluetooth LE radio (for example the iOS Simulator).
+    case bluetoothUnsupported
     /// The radios could not start. Carries the system's description.
     case failedToStart(String)
+
+    /// True when the radio layer keeps watching and reports `.ready` once the person
+    /// has fixed the problem (switched Bluetooth on, granted the permission).
+    public var recoversByItself: Bool {
+        switch self {
+        case .localNetworkDenied, .bluetoothOff, .bluetoothDenied: true
+        case .bluetoothUnsupported, .failedToStart: false
+        }
+    }
 }
 
 public enum Availability: Sendable, Equatable {

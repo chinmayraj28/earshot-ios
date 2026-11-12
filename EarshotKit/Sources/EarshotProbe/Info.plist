@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>app.earshot.probe</string>
+	<key>CFBundleName</key>
+	<string>earshot-probe</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>earshot-probe uses Bluetooth to stand in for a second phone when testing Earshot.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>earshot-probe uses the local network to stand in for a second phone when testing Earshot.</string>
+</dict>
+</plist>

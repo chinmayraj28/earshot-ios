@@ -218,8 +218,9 @@ public final class Messenger {
 
     // MARK: Going on and off the air
 
-    /// Starts looking for nearby phones. Call when the app comes to the foreground.
-    /// The first call makes iOS ask for Local Network access.
+    /// Starts looking for nearby phones. Call once the person has finished onboarding and
+    /// on every later launch. The first call makes iOS ask for Bluetooth access.
+    /// On a real iPhone this keeps working while the app is in the background.
     public func start() {
         guard availability != .on, !profile.displayName.isEmpty else { return }
         if availability != .off { transport.stop() }
@@ -239,8 +240,8 @@ public final class Messenger {
                                            tag: localTag, isVisible: profile.isVisible))
     }
 
-    /// Closes every link and stops discovery. Call when the app leaves the foreground:
-    /// iOS suspends nearby networking for backgrounded apps anyway.
+    /// Closes every link and stops discovery. Not needed when the app merely goes to the
+    /// background; use it when Earshot should be off the air.
     public func stop() {
         guard availability != .off else { return }
         for (token, link) in links where link.contactID != nil {
@@ -433,13 +434,13 @@ public final class Messenger {
         case .received(let data, let token): frameReceived(data, from: token)
         case .unavailable(let problem):
             guard availability == .on else { return }
-            // Without Local Network access no link can exist, and the transport keeps
-            // watching for the permission to be granted. Any other failure shuts it down.
-            if problem != .localNetworkDenied { transport.stop() }
+            // With Bluetooth off or a permission missing no link can exist, but the transport
+            // keeps watching for that to change. Any other failure shuts it down.
+            if !problem.recoversByItself { transport.stop() }
             tearDown()
             availability = .unavailable(problem)
         case .ready:
-            if availability == .unavailable(.localNetworkDenied) { start() }
+            if case .unavailable(let problem) = availability, problem.recoversByItself { start() }
         }
         refresh()
     }

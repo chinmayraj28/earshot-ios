@@ -103,8 +103,10 @@ public final class FilePersistence: Persistence, @unchecked Sendable {
 
     private static var writeOptions: Data.WritingOptions {
         #if os(iOS)
-        // Unreadable while the phone is locked. Earshot only runs in the foreground.
-        [.atomic, .completeFileProtection]
+        // Encrypted until the phone has been unlocked once after a restart. The stricter
+        // "only while unlocked" class would make it impossible to save a message that
+        // arrives while the phone is locked in a pocket.
+        [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
         #else
         [.atomic]
         #endif

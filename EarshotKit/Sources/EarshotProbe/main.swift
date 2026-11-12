@@ -1,9 +1,10 @@
 // earshot-probe: a headless Earshot peer for the Mac.
 //
-// It runs the same engine and the same MultipeerConnectivity transport as the app,
-// so it can stand in for a second phone when testing against the iOS Simulator:
+// It runs the same engine and the same radio layers as the app, so it can stand in
+// for a second phone:
 //
-//   swift run earshot-probe --name "Probe" --echo
+//   swift run earshot-probe --name "Probe" --echo                 (Wi-Fi/Multipeer: pairs with the iOS Simulator)
+//   swift run earshot-probe --name "Probe" --echo --bluetooth     (Bluetooth LE: pairs with a real iPhone)
 //   swift run earshot-probe --name "Caller" --invite "Probe" --send "hello" --exit-after-delivery
 //
 // It accepts every incoming request, prints what happens, and (with --echo)
@@ -20,12 +21,14 @@ var inviteName: String?
 var textToSend: String?
 var exitAfterDelivery = false
 var timeout: Double?
+var radio = Radio.multipeer
 
 var arguments = CommandLine.arguments.dropFirst().makeIterator()
 while let argument = arguments.next() {
     switch argument {
     case "--name": name = arguments.next() ?? name
     case "--echo": echo = true
+    case "--bluetooth": radio = .bluetooth
     case "--invite": inviteName = arguments.next()
     case "--send": textToSend = arguments.next()
     case "--exit-after-delivery": exitAfterDelivery = true
@@ -36,7 +39,7 @@ while let argument = arguments.next() {
     }
 }
 
-let messenger = Messenger.ephemeral()
+let messenger = Messenger.ephemeral(radio: radio)
 messenger.completeOnboarding(displayName: name)
 
 messenger.onEvent = { event in
@@ -58,7 +61,7 @@ messenger.onEvent = { event in
 }
 
 messenger.start()
-print("STARTED as \(name) (service \(MultipeerTransport.serviceType))")
+print("STARTED as \(name) over \(radio)")
 
 var seen: Set<PeerToken> = []
 var invited: Set<PeerToken> = []

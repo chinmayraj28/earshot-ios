@@ -8,7 +8,9 @@ import Network
 /// - Discovery and data travel over peer-to-peer Wi-Fi and Bluetooth. No router,
 ///   internet connection or cellular service is involved, but both radios must be switched on.
 /// - It only runs while the app is in the foreground. iOS stops advertising, browsing
-///   and open sessions shortly after an app is backgrounded.
+///   and open sessions shortly after an app is backgrounded. That is why the app on a
+///   real iPhone uses `BluetoothTransport` instead; this transport remains for the
+///   iOS Simulator (which has no Bluetooth) and for Mac-to-Mac testing.
 /// - Range is that of the phone's own radios: people in the same room or close by.
 /// - iOS asks the user for Local Network access the first time `start` is called.
 ///
@@ -276,20 +278,5 @@ extension MultipeerTransport: MCSessionDelegate {
     public nonisolated func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String,
                                     fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
         if let localURL { try? FileManager.default.removeItem(at: localURL) }
-    }
-}
-
-extension Messenger {
-    /// The messenger used by the real app: real radios, files on disk, key in the Keychain.
-    public static func live() -> Messenger {
-        Messenger(transport: MultipeerTransport(),
-                  persistence: FilePersistence(directory: FilePersistence.defaultDirectory()),
-                  identityStore: KeychainIdentityStore())
-    }
-
-    /// Real radios, but nothing is saved. Used by end-to-end tests so every run starts clean.
-    public static func ephemeral() -> Messenger {
-        Messenger(transport: MultipeerTransport(), persistence: InMemoryPersistence(),
-                  identityStore: InMemoryIdentityStore())
     }
 }
