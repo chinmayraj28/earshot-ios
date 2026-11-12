@@ -160,6 +160,11 @@ final class PhotoAndFormattingUITests: XCTestCase {
         waitForLabel(element(app, "chat.lastStatus"), toContain: "Delivered", timeout: 30)
         XCTAssertTrue(element(app, "Got it", labelContains: true).waitForExistence(timeout: 20))
         XCTAssertTrue(element(app, "Got the photo", labelContains: true).waitForExistence(timeout: 20))
+        // Visit contact details and come back: a clean way to put the keyboard away.
+        tap(app.buttons["chat.details"])
+        XCTAssertTrue(element(app, "contact.safetyCode").waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
         sleep(1)
         attach(app, "chat-formatting-and-photo")
 
@@ -170,7 +175,8 @@ final class PhotoAndFormattingUITests: XCTestCase {
         attach(app, "photo-receiving")
         XCTAssertTrue(element(app, "Photo. Here you go", labelContains: true).waitForExistence(timeout: 30))
 
-        tap(app.buttons["chat.photo"].firstMatch)
+        let photos = app.buttons.matching(identifier: "chat.photo")
+        tap(photos.element(boundBy: photos.count - 1)) // the one Maya just sent
         XCTAssertTrue(element(app, "viewer.image").waitForExistence(timeout: 10))
         sleep(1)
         attach(app, "photo-viewer")

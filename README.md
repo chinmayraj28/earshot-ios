@@ -13,6 +13,15 @@ reach a phone that is locked in a pocket, and that phone shows a notification.
   <img src="docs/screenshots/notification-banner.png" width="200" alt="A notification for a new message">
 </p>
 
+Photos and formatting:
+
+<p>
+  <img src="docs/screenshots/chat-formatting-and-photo.png" width="200" alt="Formatted text with tappable links, and a delivered photo with a caption">
+  <img src="docs/screenshots/photo-sending.png" width="200" alt="A photo being sent, 35 percent, with a cancel button">
+  <img src="docs/screenshots/photo-receiving-dark.png" width="200" alt="A photo arriving: blurred preview with progress, dark mode">
+  <img src="docs/screenshots/photo-unavailable.png" width="200" alt="The photo button explaining that photos need a live connection">
+</p>
+
 More screens and states are in [`docs/screenshots`](docs/screenshots).
 
 ## What it does
@@ -23,6 +32,14 @@ More screens and states are in [`docs/screenshots`](docs/screenshots).
 - **Conversations with honest delivery states:** Waiting (not in range, will send by
   itself), Sending, Delivered (the other phone confirmed it stored the message), Not delivered.
 - **Reconnects by itself** when a saved contact comes back into range, and re-sends what was waiting.
+- **Photos**, one at a time, while you are connected: shrunk to about 150 KB with location
+  and camera details removed, sent in small encrypted pieces with a progress ring, and
+  "Delivered" only once the other phone has received, checked and saved the whole photo.
+  Expect a few seconds to about half a minute per photo (an expectation, not yet measured
+  between two phones). No video, and no camera button yet.
+- **Light formatting**: `*bold*`, `_italic_`, `~strikethrough~`, `` `code` ``, and tappable
+  web links, email addresses and phone numbers. Display only: the raw text is what travels,
+  so older versions read every message. Links open only when tapped; no previews are fetched.
 - **Background delivery and notifications** on real iPhones, within the limits iOS sets (below).
 - **Private by design:** end-to-end encrypted between the two phones, stored only on those
   phones, no analytics, no tracking, nothing sent to anyone else.
@@ -36,6 +53,7 @@ More screens and states are in [`docs/screenshots`](docs/screenshots).
 | Both phones locked when they first meet | They do **not** find each other until one person opens Earshot. |
 | App swiped away, or phone restarted | Nothing runs until Earshot is opened again. |
 | Relaying through other phones | No. Direct only; this is not a mesh network. |
+| Photos | Only while connected, one at a time, roughly 5–50 KB/s (expected, not measured). If the link drops the photo starts again when you reconnect. No video. |
 
 The full explanation, including the security design and what Earshot does *not* protect
 against, is in [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md).
@@ -48,7 +66,7 @@ against, is in [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md).
 | `EarshotKit/Sources/EarshotProbe/` | `earshot-probe`, a command-line Earshot peer for the Mac, used as the "second phone" in tests. |
 | `Earshot/` | The SwiftUI app. |
 | `EarshotUITests/` | UI tests, accessibility audit, screenshot capture, live-link test. |
-| `Scripts/` | `e2e.sh` (Simulator ↔ Mac over a real link), `device-test.sh` (iPhone ↔ Mac over Bluetooth). |
+| `Scripts/` | `e2e.sh` (Simulator ↔ Mac over a real link, including a photo each way), `device-test.sh` (iPhone ↔ Mac over Bluetooth). |
 | `project.yml` | [XcodeGen](https://github.com/yonaskolb/XcodeGen) description of the Xcode project. |
 
 ## Setup
@@ -71,17 +89,21 @@ Signing & Capabilities (you may need to change the bundle identifier to one you 
   with this argument; the normal app never shows invented activity.
 - **A real link to your Mac:** run the app in the Simulator and, in a terminal,
   `cd EarshotKit && swift run earshot-probe --name Probe --echo`. "Probe" appears under
-  Nearby, accepts your request and echoes every message. (The Simulator has no Bluetooth,
+  Nearby, accepts your request and echoes every message. Add `--photo-echo` to answer every
+  photo with a generated test picture, and `--send-photo` to send one as soon as you connect.
+  With `EARSHOT_BT_DEBUG=1` it prints a speed line (bytes, seconds, KB/s) for each photo.
+- **Photos in the Simulator or UI tests:** the debug launch argument `-useSamplePhoto` makes
+  the photo button attach a built-in picture instead of opening the system photo picker. (The Simulator has no Bluetooth,
   so Simulator builds use Wi‑Fi through MultipeerConnectivity. Everything above the radio
   layer is the same code.)
 
 ## Tests and checks
 
 ```sh
-cd EarshotKit && swift test          # engine: 79 tests (crypto, consent, delivery, reconnection, adversaries, Bluetooth byte formats)
+cd EarshotKit && swift test          # engine: 152 tests (crypto, consent, delivery, reconnection, adversaries, Bluetooth byte formats, formatting, photos)
 cd .. && xcodegen generate
 xcodebuild -project Earshot.xcodeproj -scheme Earshot \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test   # 11 UI tests incl. accessibility audit
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test   # 16 UI tests incl. accessibility audit
 Scripts/e2e.sh                       # app in the Simulator <-> earshot-probe over a real radio link
 ```
 
@@ -89,17 +111,28 @@ Scripts/e2e.sh                       # app in the Simulator <-> earshot-probe ov
 
 Verified on this project's development machine:
 
-- Engine unit and integration tests pass (79), including hostile-peer tests.
+- Engine unit and integration tests pass (152), including hostile-peer tests for
+  photos, old↔new compatibility in both roles and over reconnection, metadata removal, and a
+  migration test that loads data saved by the previous version.
 - The app builds for the Simulator and for a real iPhone (arm64, unsigned) with no warnings.
-- 11 UI tests pass in the Simulator: onboarding, connecting, chatting, delivery states,
+- 16 UI tests pass in the Simulator (the notification-banner one runs only where
+  notifications are allowed for Earshot). New ones cover formatting with a tappable link,
+  sending a photo through to Delivered, the full-screen viewer, the share sheet opening
+  with no permission prompt, and the photo button explaining why it is unavailable. The
+  earlier ones cover onboarding, connecting, chatting, delivery states,
   out-of-range and walk-away handling, incoming request, notification explainer, a
   notification appearing and opening the right chat, and Xcode's accessibility audit in
   light and dark mode.
 - A real radio link end to end (`Scripts/e2e.sh`): the app in the Simulator discovers
   `earshot-probe`, sends a request, both sides show the same safety code, an encrypted
-  message is delivered and confirmed, and the reply arrives. This runs over
-  MultipeerConnectivity, not Bluetooth.
+  message is delivered and confirmed, and the reply arrives. Then a photo goes each way
+  (the probe checks size and hash; the app shows Delivered and the probe's picture). This
+  runs over MultipeerConnectivity, not Bluetooth.
 - The Bluetooth layer was code-reviewed independently and its byte formats are unit-tested.
+
+Photos and formatting have **not** been tried on real phones or over Bluetooth yet. They
+were checked with the engine tests, UI tests in demo mode, and `earshot-probe` ↔ `earshot-probe`
+and Simulator ↔ probe over MultipeerConnectivity (see the photo checklist below).
 
 Verified on real hardware (12 November 2026, iPhone 17 Pro and iPhone 15, plus a Mac):
 
@@ -122,6 +155,17 @@ Verified on real hardware (12 November 2026, iPhone 17 Pro and iPhone 15, plus a
 5. Switch Bluetooth off and on, and refuse the Bluetooth permission, and check the status card each time.
 6. The relaunch by iOS after it removes the app from memory (state restoration).
 7. Measure practical range indoors and outdoors, and how long a 2,000-character message takes.
+8. Photos, on two phones over Bluetooth:
+   - Send a photo from A to B and from B to A; both show progress, then "Delivered", and the
+     photo opens full screen. Write down the size and the seconds it took (with
+     `EARSHOT_BT_DEBUG=1` from Xcode the log prints KB/s), for both directions.
+   - Lock B with Earshot in the background, send a photo from A: B shows a "Photo"
+     notification (or "New message"), A shows "Delivered".
+   - Start a photo, then walk out of range halfway: A shows "Waiting", B shows nothing left
+     over; walk back: the photo starts again and is delivered once.
+   - Tap ✕ while sending: A shows "Cancelled", B's placeholder disappears.
+   - Send a text while a photo is on its way: the text arrives first.
+   - Long-press a link in a message and copy it; tap it and check Safari opens.
 
 `EARSHOT_TEAM=<your team id> Scripts/device-test.sh` installs the app on a connected
 iPhone and starts a Bluetooth partner on the Mac for these checks.
@@ -130,7 +174,11 @@ iPhone and starts a Bluetooth partner on the Mac for these checks.
 
 - No account, no server, no analytics, no crash reporting, no third-party code.
 - Permissions: **Bluetooth** (asked when you switch Earshot on) and, optionally,
-  **Notifications** (asked after your first contact connects). Nothing else.
+  **Notifications** (asked after your first contact connects). Nothing else: photos are
+  picked with Apple's photo picker, which needs no permission, and there is no camera access.
+- Photos are stripped of location, camera and date details before they are sent, and are
+  stored only on the two phones, protected like messages and excluded from backups.
+- No link previews: Earshot makes no network requests; a link opens only when you tap it.
 - Your display name is readable by nearby Earshot phones only while "Visible to people
   nearby" is on. The device name is never used.
 - Notifications are created on the phone itself and show only the sender's name unless
