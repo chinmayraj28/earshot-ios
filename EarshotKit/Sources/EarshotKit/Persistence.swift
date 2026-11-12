@@ -22,15 +22,27 @@ public protocol Persistence: Sendable {
     /// storing failed. It may be called on any thread.
     func save(conversation: Conversation, for id: ContactID, completion: (@Sendable (Bool) -> Void)?)
     func deleteConversation(for id: ContactID)
+    /// Small named stores for the relay layer (`relay-keys`, `relay-carry`). Opaque bytes.
+    /// Older stores simply have none. Default implementations keep nothing.
+    func load(blob name: String) -> Data?
+    /// `completion` as for conversations: true once safely stored.
+    func save(blob: Data, named name: String, completion: (@Sendable (Bool) -> Void)?)
     func eraseAll()
     /// Blocks until every queued write has reached the disk.
     func flush()
+}
+
+extension Persistence {
+    public func load(blob name: String) -> Data? { nil }
+    /// Keeps nothing and says so: whatever waits for this save (relay sealing) never goes ahead.
+    public func save(blob: Data, named name: String, completion: (@Sendable (Bool) -> Void)?) { completion?(false) }
 }
 
 /// Keeps everything in memory. Used by tests and by demo mode.
 public final class InMemoryPersistence: Persistence, @unchecked Sendable {
     private let lock = NSLock()
     private var state: PersistedState
+    private var blobs: [String: Data] = [:]
 
     public init(_ state: PersistedState = PersistedState()) { self.state = state }
 
@@ -42,7 +54,12 @@ public final class InMemoryPersistence: Persistence, @unchecked Sendable {
         completion?(true)
     }
     public func deleteConversation(for id: ContactID) { lock.withLock { state.conversations[id] = nil } }
-    public func eraseAll() { lock.withLock { state = PersistedState() } }
+    public func load(blob name: String) -> Data? { lock.withLock { blobs[name] } }
+    public func save(blob: Data, named name: String, completion: (@Sendable (Bool) -> Void)?) {
+        lock.withLock { blobs[name] = blob }
+        completion?(true)
+    }
+    public func eraseAll() { lock.withLock { state = PersistedState(); blobs = [:] } }
     public func flush() {}
 }
 
@@ -69,10 +86,15 @@ public final class FilePersistence: Persistence, @unchecked Sendable {
     private func conversationURL(_ id: ContactID) -> URL {
         conversationsURL.appendingPathComponent("\(id.rawValue).json")
     }
+    private var blobsURL: URL { directory.appendingPathComponent("relay", isDirectory: true) }
+    private func blobURL(_ name: String) -> URL {
+        blobsURL.appendingPathComponent(name.filter { $0.isLetter || $0.isNumber || $0 == "-" } + ".bin")
+    }
 
     private func prepareDirectory() {
         let fm = FileManager.default
         try? fm.createDirectory(at: conversationsURL, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: blobsURL, withIntermediateDirectories: true)
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var url = directory
@@ -115,11 +137,15 @@ public final class FilePersistence: Persistence, @unchecked Sendable {
     /// Queues a write. If one for the same file is already waiting, the newer value
     /// replaces it, so a burst of changes results in a single write of the latest state.
     private func write<T: Encodable & Sendable>(_ value: T, to url: URL, completion: (@Sendable (Bool) -> Void)? = nil) {
+        enqueue({ try? JSONEncoder().encode(value) }, to: url, completion: completion)
+    }
+
+    private func enqueue(_ encode: @escaping @Sendable () -> Data?, to url: URL, completion: (@Sendable (Bool) -> Void)?) {
         let alreadyQueued = lock.withLock { () -> Bool in
             let existing = pending[url]
             var completions = existing?.completions ?? []
             if let completion { completions.append(completion) }
-            pending[url] = PendingWrite(encode: { try? JSONEncoder().encode(value) }, completions: completions)
+            pending[url] = PendingWrite(encode: encode, completions: completions)
             return existing != nil
         }
         guard !alreadyQueued else { return }
@@ -163,6 +189,20 @@ public final class FilePersistence: Persistence, @unchecked Sendable {
     public func save(contacts: [Contact]) { write(contacts, to: contactsURL) }
     public func save(conversation: Conversation, for id: ContactID, completion: (@Sendable (Bool) -> Void)?) {
         write(conversation, to: conversationURL(id), completion: completion)
+    }
+
+    /// nil when there is no such store. A store that exists but cannot be read (for example before
+    /// the phone's first unlock) comes back as empty data, so callers can fail closed.
+    public func load(blob name: String) -> Data? {
+        let url = blobURL(name)
+        return queue.sync {
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return (try? Data(contentsOf: url)) ?? Data()
+        }
+    }
+
+    public func save(blob: Data, named name: String, completion: (@Sendable (Bool) -> Void)?) {
+        enqueue({ blob }, to: blobURL(name), completion: completion)
     }
 
     public func deleteConversation(for id: ContactID) {

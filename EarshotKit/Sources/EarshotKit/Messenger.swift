@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -17,6 +18,20 @@ public final class Messenger {
     public struct Configuration: Sendable {
         /// How long to wait for a delivery receipt before marking a message failed.
         public var ackTimeout: Duration = .seconds(10)
+        /// Texts sent and not yet confirmed, per link: at most this many, and at most
+        /// `maxTextBytesInFlight` bytes of text (but always at least one). The rest wait their turn,
+        /// in order. Why these numbers: at the slowest expected Bluetooth speed (about 5 KB/s) 32 KB
+        /// drains in about 6 seconds, so even the last text in the window gets its receipt well within
+        /// `ackTimeout`; and with photos (3 pieces, about 16 KB) and a relay round (about 72 KB) on the
+        /// same link, what is queued towards one phone stays far below the radio's 1 MiB cap.
+        public var maxTextsInFlight = 20
+        public var maxTextBytesInFlight = 32 * 1024
+        /// The sender's own pace for texts and photo announcements on a link: a burst, then a rate.
+        /// Kept just under what every Earshot version's receiver allows (`incomingBurst` 60, then
+        /// `incomingRate` 5 per second), so a long backlog never trips the other phone's flood limit.
+        /// A backlog of 300 short texts therefore takes about a minute to send.
+        public var outgoingTextBurst = 50.0
+        public var outgoingTextRate = 4.5
         /// How long the key exchange and identity proof may take.
         public var handshakeTimeout: Duration = .seconds(12)
         /// How long the other person has to answer a connection request.
@@ -51,6 +66,27 @@ public final class Messenger {
         /// closes the link on any photo payload, exactly as an older version's decoder would.
         var legacyProtocolForTesting = false
 
+        // Relaying. See `Messenger+Relay.swift` and `RelayLimits`.
+        /// Bursts of relay activity (envelopes arriving one by one) are answered with one exchange after this.
+        public var relaySyncDelay: Duration = .milliseconds(40)
+        /// Each link gets at most one relay exchange (offers, receipts) per this interval.
+        public var relayMinExchangeInterval: Duration = .milliseconds(250)
+        /// A link may deliver this many relay control messages in a burst, then `relayIncomingRate` per
+        /// second. Separate from the text allowance. With exchanges spaced as above an honest phone
+        /// sends at most about 16 per second on a link (see `Messenger+Relay.swift`).
+        public var relayIncomingBurst = 300.0
+        public var relayIncomingRate = 30.0
+        /// Frequent relay changes are saved together at most this often.
+        public var relaySaveDelay: Duration = .seconds(1)
+        /// Own messages sealed within this time share one write-ahead save.
+        public var relayWriteAheadDelay: Duration = .milliseconds(50)
+        /// How often expired carried envelopes are cleared while Earshot is on.
+        public var relayHousekeepingInterval: Duration = .seconds(600)
+        /// The clock used for relay expiry. Tests move it forward.
+        var now: @Sendable () -> Date = { Date() }
+        /// Tests only: behave like a build that has photos but no relaying (announces no `relay-v1`).
+        var announcesRelay = true
+
         public init() {}
     }
 
@@ -80,6 +116,22 @@ public final class Messenger {
     public internal(set) var incomingPhotos: [ContactID: [IncomingPhoto]] = [:]
     /// Why a photo was not delivered, when there is something more specific to say. Not saved.
     public internal(set) var photoFailures: [UUID: PhotoFailure] = [:]
+
+    // Relaying (see `Messenger+Relay.swift`).
+    /// Whether this phone takes part in relaying. Change with `setCarryMode(_:)`. Saved.
+    public internal(set) var carryMode: CarryMode = .friends
+    /// Contacts a message can reach through friends' phones while you are apart: both of you
+    /// confirmed relay keys on your last direct link, and relaying is on.
+    public internal(set) var relayContacts: Set<ContactID> = []
+    /// Contacts linked right now over a link on which both phones agreed to carry for each other.
+    public internal(set) var relayCarriersInRange: Set<ContactID> = []
+    /// Own messages sealed for relaying and not yet confirmed: how many contacts' phones have
+    /// taken a copy (0 = sealed, no friend has taken it yet). Absent: not sealed for relaying
+    /// (it waits for a direct link only), or the sealed copy expired.
+    public internal(set) var relayHandoffs: [UUID: Int] = [:]
+    /// Sealed envelopes this phone carries for others, and their total size in bytes.
+    public internal(set) var carriedMailCount = 0
+    public internal(set) var carriedMailBytes = 0
 
     // MARK: Internals
     // Internal rather than private where `Messenger+Photos.swift` needs them.
@@ -112,6 +164,16 @@ public final class Messenger {
         /// Allowance for incoming photo bytes, like `incomingBudget`.
         var photoByteBudget = 0.0
         var photoBudgetUpdated = ContinuousClock.now
+        /// This phone's own allowance for sending texts and photo announcements on this link.
+        var sendBudget = 0.0
+        var sendBudgetUpdated = ContinuousClock.now
+        /// This link's X25519 shared secret, kept only until the identity proofs are checked,
+        /// then used once for relay keys (`RelayCrypto.root`) and forgotten.
+        var relaySecret: SymmetricKey?
+        var relayEphemerals: (local: Data, remote: Data)?
+        /// Whether this phone listed `relay-v1` in its own identity proof on this link.
+        var announcedRelay = false
+        var relay = LinkRelay()
 
         var contactID: ContactID? {
             if case .established(let id) = phase { return id }
@@ -139,12 +201,14 @@ public final class Messenger {
     }
 
     @ObservationIgnored public var onEvent: ((Event) -> Void)?
+    /// Diagnostics only: what the relay layer did. Never message text, names or keys.
+    @ObservationIgnored public var onRelayActivity: ((RelayActivity) -> Void)?
     @ObservationIgnored private let transport: Transport
     @ObservationIgnored let persistence: Persistence
     @ObservationIgnored let attachments: AttachmentStore
     @ObservationIgnored private let identityStore: IdentityStore
     @ObservationIgnored let configuration: Configuration
-    @ObservationIgnored private var identity: Identity
+    @ObservationIgnored var identity: Identity
     /// False when the Keychain could not be read; the identity is then temporary and retried on `start()`.
     @ObservationIgnored private var identityIsStored: Bool
     /// Bumped whenever everything is torn down, so timers from before then do nothing.
@@ -162,6 +226,20 @@ public final class Messenger {
     @ObservationIgnored var outgoingTransfers: [UUID: OutgoingTransfer] = [:]
     /// Photos this phone is receiving, by message ID.
     @ObservationIgnored var incomingTransfers: [UUID: IncomingTransfer] = [:]
+    /// Relay keys, own sealed messages and carried mail (`RelayState`).
+    @ObservationIgnored var relay = RelayState()
+    /// Own envelopes sealed but not yet safely stored: never offered until they are.
+    @ObservationIgnored var relayUnpersisted: Set<Data> = []
+    @ObservationIgnored var relaySyncScheduled = false
+    @ObservationIgnored var relaySaveScheduled = false
+    @ObservationIgnored var relayWriteAheadScheduled = false
+    /// Contacts whose text queue waits for the send allowance to refill.
+    @ObservationIgnored var textPumpScheduled: Set<ContactID> = []
+    @ObservationIgnored var relayKeysDirty = false
+    @ObservationIgnored var relayCarryDirty = false
+    /// True when the relay store could not be read at launch: relaying stays off and nothing is
+    /// written over the store until the person chooses a setting.
+    @ObservationIgnored var relaySavesSuspended = false
 
     /// - Parameter attachments: where photo files are kept. Defaults to memory (tests, demo mode).
     public init(transport: Transport, persistence: Persistence, identityStore: IdentityStore,
@@ -192,6 +270,7 @@ public final class Messenger {
         // when the app was stopped, or one whose message was deleted just before a crash.
         let referenced = conversations.values.flatMap(\.messages).compactMap(\.photo?.fileName)
         attachments.removeAll(except: Set(referenced))
+        loadRelay()
         transport.eventHandler = { [weak self] event in self?.handle(event) }
     }
 
@@ -282,6 +361,9 @@ public final class Messenger {
         availability = .on
         transport.start(LocalAdvertisement(displayName: profile.displayName, nonce: localNonce,
                                            tag: localTag, isVisible: profile.isVisible))
+        relayHousekeeping()
+        scheduleRelayHousekeeping()
+        relaySealWaiting()
     }
 
     /// Closes every link and stops discovery. Not needed when the app merely goes to the
@@ -301,6 +383,12 @@ public final class Messenger {
     /// Forgets every link, nearby device and request, and cancels all running timers.
     private func tearDown() {
         epoch += 1
+        // Timers from before this point never run (the epoch changed), so nothing may wait on them.
+        relaySyncScheduled = false
+        relaySaveScheduled = false
+        relayWriteAheadScheduled = false
+        textPumpScheduled.removeAll()
+        flushRelaySaves()
         let open = links.values.compactMap(\.contactID)
         links.removeAll()
         discovered.removeAll()
@@ -311,7 +399,7 @@ public final class Messenger {
         open.forEach(parkUnconfirmedMessages)
     }
 
-    private func restartIfRunning() {
+    func restartIfRunning() {
         guard availability == .on else { return }
         stop()
         start()
@@ -387,6 +475,7 @@ public final class Messenger {
         trimHistory(id)
         transmit(message.id, to: id)
         persist(id)
+        relaySealWaiting()
         // In range but not linked (for example after several failed attempts): try again now.
         if link(to: id) == nil { autoConnect(id) }
         return conversations[id]?.messages.first { $0.id == message.id }
@@ -405,6 +494,7 @@ public final class Messenger {
         let removed = conversations[id]?.messages.filter { $0.id == messageID } ?? []
         conversations[id]?.messages.removeAll { $0.id == messageID }
         forgetPhotos(of: removed)
+        relayForget(removed)
         persist(id)
     }
 
@@ -423,16 +513,19 @@ public final class Messenger {
         guard let old = conversations[id] else { return }
         conversations[id] = Conversation()
         forgetPhotos(of: old.messages)
+        relayForget(old.messages)
         persist(id)
     }
 
     /// Forgets a person and their messages. They would have to send a new request to reach you.
     public func removeContact(_ id: ContactID) {
+        forgetPhones(of: id)
         closeLinks(to: id)
         contacts.removeAll { $0.id == id }
         forgetPhotos(of: conversations[id]?.messages ?? [])
         conversations[id] = nil
         knownMessageIDs[id] = nil
+        relayForget(contact: id)
         persistence.save(contacts: contacts)
         persistence.deleteConversation(for: id)
         recogniseDiscovered()
@@ -444,8 +537,15 @@ public final class Messenger {
         guard let index = contacts.firstIndex(where: { $0.id == id }), contacts[index].isBlocked != blocked else { return }
         contacts[index].isBlocked = blocked
         persistence.save(contacts: contacts)
-        if blocked { closeLinks(to: id) }
+        if blocked {
+            forgetPhones(of: id)
+            closeLinks(to: id)
+            // Nothing more is sealed for them or opened from them, and copies waiting with friends
+            // are asked to be deleted (best effort, see `relayForget(contact:)`).
+            relayForget(contact: id)
+        }
         recogniseDiscovered()
+        refreshRelayState()
         refresh()
         if !blocked { autoConnect(id) }
     }
@@ -458,6 +558,7 @@ public final class Messenger {
 
     /// Deletes all messages, contacts, the profile and this phone's identity key.
     public func eraseEverything() {
+        transport.forgetAllPeers()
         stop()
         identityStore.delete()
         persistence.eraseAll()
@@ -469,6 +570,7 @@ public final class Messenger {
         conversations = [:]
         knownMessageIDs = [:]
         activeConversation = nil
+        relayEraseAll()
     }
 
     // MARK: Transport events
@@ -519,6 +621,8 @@ public final class Messenger {
             found.isBlocked = contact.isBlocked
         }
         discovered[token] = found
+        // A blocked contact's phone came back into range: the radio should not keep it connected.
+        if found.isBlocked { transport.forget(token) }
         guard let id = found.contactID, !found.isBlocked else { return }
         reconnectAttempts[id] = 0
         if localNonce.lexicographicallyPrecedes(found.nonce) {
@@ -674,7 +778,9 @@ public final class Messenger {
             case .hello(let version, let remoteEphemeral):
                 guard case .awaitingHello(let handshake) = link.phase else { throw LinkFailure.protocolViolation }
                 guard version == Handshake.version else { throw LinkFailure.incompatibleVersion }
-                link.channel = try handshake.channel(remoteEphemeral: remoteEphemeral)
+                let secrets = try handshake.linkSecrets(remoteEphemeral: remoteEphemeral)
+                link.channel = secrets.channel
+                link.relaySecret = secrets.sharedSecret
                 link.phase = .awaitingAuth(localEphemeral: handshake.publicKey, remoteEphemeral: remoteEphemeral)
                 links[token] = link
                 if let expected = link.expected, let contact = contact(expected) {
@@ -719,6 +825,7 @@ public final class Messenger {
             else { throw LinkFailure.verificationFailed }
             // Trust only what this link announced: a contact may have changed Earshot versions.
             links[token]?.peerFeatures = Self.acceptedFeatures(auth.features)
+            links[token]?.relayEphemerals = (localEphemeral, remoteEphemeral)
             try establish(token, identityKey: auth.identityKey, name: auth.name)
 
         case (.text(let text), .established(let id)):
@@ -739,12 +846,18 @@ public final class Messenger {
                 persist(id)
             }
             photoDelivered(messageID, on: token)
+            relayDeliveredDirectly(messageID)
+            pumpTexts(to: id)
 
         case (.photoStart, .established), (.photoPiece, .established), (.photoProgress, .established),
              (.photoCancel, .established), (.photoRefuse, .established):
             // An older Earshot cannot decode these at all and closes the link; the test switch copies that.
             if configuration.legacyProtocolForTesting { throw LinkFailure.protocolViolation }
             try handlePhoto(payload, from: token)
+
+        case (.relaySync, .established), (.relayConfirmed, .established), (.relayOffer, .established), (.relayWant, .established),
+             (.relayEnvelope, .established), (.relayDone, .established), (.relayReceipts, .established):
+            try handleRelay(payload, from: token)
 
         case (.bye, .established):
             throw LinkFailure.remoteLeft
@@ -824,16 +937,27 @@ public final class Messenger {
         link.budgetUpdated = .now
         link.photoByteBudget = configuration.incomingPhotoByteBurst
         link.photoBudgetUpdated = .now
+        link.sendBudget = configuration.outgoingTextBurst
+        link.sendBudgetUpdated = .now
         links[token] = link
         discovered[token]?.contactID = id
         reconnectAttempts[id] = 0
         updateRequest(token) { $0.state = .connected(id) }
         onEvent?(.connected(id))
 
-        for message in messages(for: id) where message.direction == .outgoing && (message.status == .waiting || message.status == .sending) {
+        for message in messages(for: id) where message.direction == .outgoing && message.photo != nil
+            && (message.status == .waiting || message.status == .sending) {
             transmit(message.id, to: id)
         }
+        // Texts still marked "sending" were sent over an older link (replaced just now, without a
+        // drop event): their receipts will never come on this one, so they go back in the queue.
+        for message in messages(for: id) where message.direction == .outgoing && message.photo == nil && message.status == .sending {
+            setStatus(.waiting, of: message.id, in: id)
+        }
+        pumpTexts(to: id)
         persist(id)
+        relayLinkEstablished(token)
+        refreshRelayState()
     }
 
     // MARK: Link teardown and recovery
@@ -842,6 +966,14 @@ public final class Messenger {
         guard let link = links.removeValue(forKey: token) else { return }
         transport.disconnect(token)
         linkEnded(link, because: failure)
+    }
+
+    /// Tells the radio to stop reconnecting by itself to this contact's phone (blocked or removed).
+    /// Ordinary drops (timeouts, rule breaks) only `disconnect`, so the radio keeps trying those.
+    private func forgetPhones(of id: ContactID) {
+        var tokens = Set(links.compactMap { $0.value.contactID == id || $0.value.expected == id ? $0.key : nil })
+        tokens.formUnion(discovered.values.filter { $0.contactID == id }.map(\.token))
+        tokens.forEach(transport.forget)
     }
 
     private func closeLinks(to id: ContactID) {
@@ -905,6 +1037,7 @@ public final class Messenger {
             changed = true
         }
         if changed { persist(id) }
+        relaySealWaiting()
     }
 
     // MARK: Sending
@@ -923,27 +1056,91 @@ public final class Messenger {
             throw LinkFailure.protocolViolation
         }
         let transcript = Handshake.transcript(signerEphemeral: localEphemeral, peerEphemeral: remoteEphemeral)
+        let features = configuration.legacyProtocolForTesting ? nil : announcedFeatures
         link.authSent = true
+        link.announcedRelay = features?.contains(Feature.relay) ?? false
         links[token] = link
         try send(.auth(.init(identityKey: identity.publicKey, name: profile.displayName,
-                             signature: try identity.sign(transcript),
-                             features: configuration.legacyProtocolForTesting ? nil : Feature.all)), to: token)
+                             signature: try identity.sign(transcript), features: features)), to: token)
     }
 
     func transmit(_ messageID: UUID, to id: ContactID) {
         guard let message = messages(for: id).first(where: { $0.id == messageID }),
               let link = links.values.first(where: { $0.contactID == id }) else { return }
         if message.photo != nil { return transmitPhoto(message, to: id, over: link) }
+        // Texts go out in order through a bounded window (see `pumpTexts`), never all at once.
+        pumpTexts(to: id)
+    }
+
+    /// Sends waiting texts to a linked contact, oldest first, while fewer than `maxTextsInFlight`
+    /// texts (and `maxTextBytesInFlight` bytes) are unconfirmed on the link. Runs again whenever a
+    /// receipt arrives, a text times out, a new text is written or the link comes up, so a backlog
+    /// drains steadily and a text written meanwhile queues behind it.
+    ///
+    /// It cannot stall: every text in flight either gets its receipt, or is marked "Not delivered"
+    /// after `ackTimeout` (which frees its place), or goes back to Waiting when the link drops and
+    /// is sent again on the next link (the receiver ignores IDs it already has).
+    func pumpTexts(to id: ContactID) {
+        guard let token = links.first(where: { $0.value.contactID == id })?.key else { return }
+        let outgoing = messages(for: id).filter { $0.direction == .outgoing && $0.photo == nil }
+        var inFlight = outgoing.filter { $0.status == .sending }
+        var bytes = inFlight.reduce(0) { $0 + Self.textCost($1) }
+        for message in outgoing where message.status == .waiting {
+            guard inFlight.count < configuration.maxTextsInFlight,
+                  inFlight.isEmpty || bytes + Self.textCost(message) <= configuration.maxTextBytesInFlight,
+                  let link = links[token], link.contactID == id else { return }
+            guard takeSendAllowance(on: token) else {
+                // Over our own pace: try again as soon as one more text is allowed.
+                guard !textPumpScheduled.contains(id) else { return }
+                textPumpScheduled.insert(id)
+                after(.milliseconds(Int(1000 / max(configuration.outgoingTextRate, 0.1)) + 1)) { messenger in
+                    messenger.textPumpScheduled.remove(id)
+                    messenger.pumpTexts(to: id)
+                }
+                return
+            }
+            sendText(message, to: id, over: link)
+            guard links[token]?.id == link.id else { return } // the send failed and the link was dropped
+            inFlight.append(message)
+            bytes += Self.textCost(message)
+        }
+    }
+
+    /// Spends one unit of this phone's send allowance on a link (refilled over time). Photo
+    /// announcements pass `force` (they are never held back, one photo at a time) but still count.
+    @discardableResult
+    func takeSendAllowance(on token: PeerToken, force: Bool = false) -> Bool {
+        guard var link = links[token] else { return false }
+        let now = ContinuousClock.now
+        let elapsed = now - link.sendBudgetUpdated
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+        link.sendBudget = min(configuration.outgoingTextBurst, link.sendBudget + seconds * configuration.outgoingTextRate)
+        link.sendBudgetUpdated = now
+        guard link.sendBudget >= 1 || force else {
+            links[token] = link
+            return false
+        }
+        link.sendBudget -= 1
+        links[token] = link
+        return true
+    }
+
+    /// Roughly what a text costs on the link: its UTF-8 plus JSON and encryption overhead.
+    private static func textCost(_ message: Message) -> Int { message.text.utf8.count + 100 }
+
+    private func sendText(_ message: Message, to id: ContactID, over link: Link) {
+        let messageID = message.id
         // Mark it first: on a fast link the receipt can arrive before `send` returns.
         setStatus(.sending, of: messageID, in: id)
         do {
             try send(.text(.init(id: message.id, text: message.text)), to: link.token)
-            let linkID = link.id
+            let linkID = link.id, token = link.token
             after(configuration.ackTimeout) { messenger in
-                guard messenger.links[link.token]?.id == linkID,
+                guard messenger.links[token]?.id == linkID,
                       messenger.messages(for: id).first(where: { $0.id == messageID })?.status == .sending else { return }
                 messenger.setStatus(.failed, of: messageID, in: id)
                 messenger.persist(id)
+                messenger.pumpTexts(to: id)
             }
         } catch {
             // The link is gone but we have not been told yet. Park the message and let
@@ -966,11 +1163,12 @@ public final class Messenger {
         links[token] = link
     }
 
-    private func trimHistory(_ id: ContactID) {
+    func trimHistory(_ id: ContactID) {
         guard let count = conversations[id]?.messages.count, count > Limits.maxStoredMessages,
               let dropped = conversations[id]?.messages.prefix(count - Limits.maxStoredMessages) else { return }
         conversations[id]?.messages.removeFirst(count - Limits.maxStoredMessages)
         forgetPhotos(of: Array(dropped))
+        relayForget(Array(dropped))
     }
 
     func setStatus(_ status: DeliveryStatus, of messageID: UUID, in id: ContactID) {
@@ -1017,6 +1215,7 @@ public final class Messenger {
             link.peerFeatures.contains(Feature.photo) ? link.contactID : nil
         })
         if photoCapable != photoCapableContacts { photoCapableContacts = photoCapable }
+        refreshRelayState()
 
         let peers = discovered.values.filter { !$0.isBlocked }.map { found in
             NearbyPeer(id: found.token,

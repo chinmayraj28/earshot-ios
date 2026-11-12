@@ -16,8 +16,10 @@ public enum Radio: Sendable {
         #endif
     }
 
+    /// The radio layer this choice uses. The app keeps it to read Bluetooth link diagnostics
+    /// (`BluetoothTransport.diagnostics()`) for its Range test screen.
     @MainActor
-    func makeTransport() -> Transport {
+    public func makeTransport() -> Transport {
         switch self {
         case .bluetooth: BluetoothTransport()
         case .multipeer: MultipeerTransport()
@@ -28,7 +30,12 @@ public enum Radio: Sendable {
 extension Messenger {
     /// The messenger used by the real app: real radios, files on disk, key in the Keychain.
     public static func live(radio: Radio = .standard) -> Messenger {
-        Messenger(transport: radio.makeTransport(),
+        live(transport: radio.makeTransport())
+    }
+
+    /// The real app's messenger on a radio layer the caller made (and may keep a reference to).
+    public static func live(transport: Transport) -> Messenger {
+        Messenger(transport: transport,
                   persistence: FilePersistence(directory: FilePersistence.defaultDirectory()),
                   identityStore: KeychainIdentityStore(),
                   attachments: AttachmentStore(directory: AttachmentStore.defaultDirectory()))
@@ -36,7 +43,11 @@ extension Messenger {
 
     /// Real radios, but nothing is saved. Used by end-to-end tests so every run starts clean.
     public static func ephemeral(radio: Radio = .standard) -> Messenger {
-        Messenger(transport: radio.makeTransport(), persistence: InMemoryPersistence(),
-                  identityStore: InMemoryIdentityStore())
+        ephemeral(transport: radio.makeTransport())
+    }
+
+    /// Real radios on a transport the caller made, nothing saved.
+    public static func ephemeral(transport: Transport) -> Messenger {
+        Messenger(transport: transport, persistence: InMemoryPersistence(), identityStore: InMemoryIdentityStore())
     }
 }

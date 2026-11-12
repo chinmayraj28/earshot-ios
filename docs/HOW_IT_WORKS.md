@@ -14,7 +14,7 @@ phone-to-phone radio that iOS lets an app keep using while the app is in the bac
 | --- | --- |
 | Does it need internet, Wi‑Fi, a router or mobile signal? | No. Only Bluetooth must be on. It can be on in Airplane Mode. |
 | How far does it reach? | Bluetooth range: the same room, or a few tens of metres with a clear line of sight. Walls, bodies and crowds shorten it. Earshot does not promise a distance. |
-| Are messages relayed through other phones? | No. Earshot is direct, phone to phone. It is not a mesh network. |
+| Are messages relayed through other phones? | Only through your contacts' phones, only for text, and only if both people have relaying on (it is on by default). A message to a contact who is out of range can be carried, sealed, by a friend who later comes near them. See [Relaying through friends' phones](#relaying-through-friends-phones). Earshot is not an open mesh: strangers never carry your messages and you never carry theirs. |
 | What permissions does iOS ask for? | Bluetooth, when Earshot is first switched on. Notifications, later and optionally, when there is a first contact to be notified about. Nothing else. |
 | How fast is it? | Slow by internet standards but enough for text and small photos. Expect a short message to arrive almost at once on an open link and a 2,000-character message to take a few seconds. Expect very roughly 5–50 KB/s depending on the phones and the direction, so a photo (about 50–150 KB once Earshot has shrunk it) takes a few seconds to about half a minute. None of these speeds has been measured between two phones yet; they are expectations. |
 
@@ -45,7 +45,8 @@ showing the message text is an opt-in setting.
 
 What happens to a message when the other person is not reachable: it is stored on the
 sender's phone with the status **Waiting** and is sent automatically the next time the
-two phones link up.
+two phones link up. If both have relaying on and have met since upgrading, a sealed copy
+can also travel there through contacts' phones (see Relaying through friends' phones).
 
 ### How the Bluetooth link is built
 
@@ -129,13 +130,27 @@ Every message carries a random ID. The receiving phone stores it and returns a r
 
 | Status | Meaning |
 | --- | --- |
-| Waiting | The contact is not connected. Sent automatically when the phones link up again. |
+| Waiting | The contact is not connected. Sent automatically when the phones link up again. A sealed copy may meanwhile be with friends' phones (`relayHandoffs` says how many took one); that is still Waiting, not Delivered. |
+| Delivered (through friends) | As Delivered, but the receipt came back through friends' phones (`Message.relayed`). |
 | Sending | Handed to the link; no receipt yet. |
 | Delivered | The other phone confirmed it received and stored the message. (Not "read".) |
 | Not delivered | No receipt within 10 seconds on a live link (for example the other phone could not store it). Tap to retry. For photos the rule is different, see Photos below. |
 
 If a link drops with messages in flight they return to Waiting and are re-sent after
 reconnecting. The receiver ignores IDs it already has, so nothing is duplicated.
+
+Waiting texts are not all sent at once when a link comes up. At most 20 texts, and at most 32 KB of
+text, are on their way without a receipt at any time; the next goes out as each receipt arrives,
+oldest first, and a text written meanwhile queues behind them. At the slowest expected Bluetooth
+speed 32 KB takes about 6 seconds, so even the last text in that window is confirmed well within the
+10-second receipt timeout, and the radio's per-phone send queue (1 MiB) is never overrun. A text
+whose receipt never comes is marked Not delivered after 10 seconds, which frees its place, so a
+backlog cannot get stuck. Photos keep their own window (three pieces).
+
+The sender also keeps its own pace under the receiver's flood limit (which every Earshot version
+enforces: 60 messages at once, then 5 per second): it sends at most 50 texts at once, then 4.5 per
+second. So a long backlog is never cut off as a "flood", but it takes time: 300 waiting texts take
+about a minute to go out.
 
 Each frame has a counter that must be exactly the next expected one; frames that are
 replayed, skipped, re-ordered or modified close the link. Earshot then reconnects with
@@ -316,6 +331,203 @@ link, too many photo bytes or announcements too fast, progress beyond what was s
   person can still appear as a *new* request under any name; accepting it fails at the
   identity check and no link forms. At most four unanswered requests are shown at once.
 
+## Relaying through friends' phones
+
+Asha and Ben are contacts but out of range of each other. Chidi is a contact of Asha, and Chidi
+and Ben are contacts too. Before relaying, Asha's message waited until she and Ben were in range.
+Now it can travel through Chidi's phone. Chidi cannot read it and cannot tell who it is for.
+
+### What happens, step by step
+
+1. **Keys, made when they meet.** The last time Asha and Ben were linked directly (with versions
+   that relay), both phones derived a fresh set of relay keys from that link's private key
+   exchange and confirmed to each other that they got the same ones (`relaySync`). Until that has
+   happened once, nothing is relayed between them: messages wait for range as before.
+2. **Sealing.** Asha writes to Ben while he is not linked. Her phone seals the text into an
+   *envelope* that only Ben's phone can open. The message also stays in her normal outbox:
+   if she meets Ben first, it is delivered directly as before, and the sealed copy is cleared.
+3. **Carrying.** Whenever two contacts' phones are linked and both have relaying on, each offers
+   the other a list of envelope IDs it holds; the other asks for the ones it has not seen and
+   receives them. Chidi's phone takes Asha's envelope this way. Later, when Chidi's phone links
+   with Ben's, it offers it again. Multi-hop happens on its own: carried mail is offered onward
+   to every other contact the carrier links with.
+4. **Opening.** Ben's phone recognises a tag on the outside of the envelope that only it can
+   recognise, opens it, stores the message (marked as having come through friends) and shows a
+   notification as for any message.
+5. **Receipt.** Once the message is safely stored, Ben's phone releases a small *receipt secret*.
+   Carriers check it against the envelope, delete their copy and pass the receipt on. When it
+   reaches Asha's phone (through any friend, or directly), her message shows **Delivered**.
+
+When all three phones are in range of each other's chain (A–C and C–B linked at the same time),
+this takes seconds. When Chidi only meets Ben hours later, the message arrives then. An envelope
+expires 48 hours after it was sealed; after that carriers delete it, and Asha's message still
+waits and is delivered directly when she meets Ben. An expired copy is not sealed again: from then
+on the message only travels directly (`relayHandoffs` no longer lists it, so it shows as plain Waiting).
+
+### What the interface knows
+
+- A per-contact fact "relaying available" (`Messenger.relayContacts`, `canRelay(to:)`): relaying
+  is on and the two phones confirmed relay keys on their last direct link.
+- For each of your own sealed messages, how many contacts' phones took a copy
+  (`Messenger.relayHandoffs`). This is not "Delivered": a copy with a friend may still never reach
+  the recipient.
+- `Message.relayed`: on a received message, it came through friends; on a sent message,
+  Delivered was confirmed by a receipt that came back through friends.
+- How many sealed envelopes this phone carries for others and their size
+  (`carriedMailCount`, `carriedMailBytes`), and which linked contacts carry right now
+  (`relayCarriersInRange`).
+
+### The setting
+
+| Setting | What it means |
+| --- | --- |
+| **Friends** (default) | Your messages can travel through contacts' phones, and your phone carries sealed messages for your contacts. |
+| **Off** (also if the relay store cannot be read at launch: Earshot then stays off for that run and leaves the store untouched, until you choose a setting) | Your phone takes no part at all. It does not announce relaying, carries nothing for anyone, never hands your messages to anyone else, and deletes every relay key, everything it carried, and its own sealed copies. Your messages wait for direct range, exactly as before relaying existed. Envelopes already handed to friends cannot be called back; they expire within 48 hours. |
+
+Changing the setting reopens the current links so the other phones learn the new choice.
+
+### Who can learn what
+
+| Who | Can | Cannot |
+| --- | --- | --- |
+| A friend carrying an envelope | See that a contact's phone handed it sealed mail, when, and its size (512, 2,048 or 8,192 bytes). See when a receipt for it came back. If the same friend hands it straight to the recipient and soon gets the receipt, they may guess who it was for. | Read it. See who wrote it or who it is for: there is no name, key, contact ID or sender field in it, and every envelope has a fresh one-time tag. Tell whether two envelopes are between the same two people. Change, forge or replay a message. Forge a receipt. |
+| A friend you both have | Same as any carrier. | Compute your relay keys or tags. They come from the private key exchange of a link between the two of you, never from public keys (unlike `PairTag` and `Knock`, see "does not protect against"). |
+| Someone who takes a carrier's phone | Find sealed envelopes, receipt hashes and expiry times. The carrier's phone never records which contact handed it which envelope. | Read them, or tell whose they are. |
+| Someone who takes the sender's or recipient's phone | Read stored chats as before. Read relayed messages that are still on their way (or sent later), until the two people next link directly and make fresh keys, and for up to 7 days after that: older keys are kept a week once the contact confirms the new ones, for envelopes still travelling (longer if the contact never confirms them). | Read relayed messages that were already delivered: their keys are deleted. |
+| A radio listener | See that Earshot phones exchange data and roughly how much, as before. | Read anything: relay traffic travels inside the existing encrypted link between two contacts. |
+
+### Key schedule
+
+Nothing here is derived from `PairSecret`, which is computed from two public keys and so could be
+computed by any friend the two people share.
+
+1. **Root.** On a direct link where both identity proofs listed `relay-v1`:
+   `root = HKDF-SHA256(ikm = S, salt = lowEphemeral ‖ highEphemeral, info = "earshot relay root v1" ‖ lowIdentityKey ‖ highIdentityKey, 32 bytes)`.
+   S is that link's X25519 shared secret (the same one the link keys come from, already
+   authenticated by both signatures); "low" and "high" mean the two values sorted byte by byte.
+   A link whose S is all zeros derives nothing.
+2. **Generation ID.** `HKDF-Expand(root, "earshot relay gen v1", 8)`. Each phone sends it as
+   `relaySync`, but only after the new incoming chain is safely saved. Getting the same 8 bytes back
+   proves the other phone derived the same root; the phone then seals under it and says so with
+   `relayConfirmed`.
+3. **Chains.** `CK0[A→B] = HKDF-Expand(root, "earshot relay chain v1" ‖ IK_A ‖ IK_B, 32)`, one per
+   direction (IK = Ed25519 identity public key). The root is then forgotten. The incoming chain is
+   installed and saved at once; the outgoing chain is used only after the peer's `relaySync`.
+4. **Per message i.** `MK_i = HMAC-SHA256(CK_i, 0x01)` (ChaCha20-Poly1305 key),
+   `tag_i = HMAC-SHA256(CK_i, 0x02)[0..<16]`, `RS_i = HMAC-SHA256(CK_i, 0x03)[0..<16]` (receipt secret),
+   `CK_{i+1} = HMAC-SHA256(CK_i, 0x04)`. The sender saves the advanced chain *before* the envelope
+   can be handed to anyone.
+5. **Recipient window.** The recipient recognises the next 256 tags of each incoming chain. When
+   message j arrives before earlier ones, the keys for the earlier ones are kept (at most 1,000 per
+   contact, for 7 days) and the chain moves past j, so j's key is gone once used. A sender never
+   seals further ahead than 256 past the last index a receipt confirmed, and has at most 200
+   unconfirmed sealed messages per contact (500 in total).
+6. **Generations.** Every direct link makes a new generation. An older incoming chain is retired
+   only 7 days after the contact confirmed a newer one (`relayConfirmed`, or an envelope under the
+   newer one arrived). A contact that never learned about the newer one keeps using the older one,
+   and is still understood. At most 6 are kept; the newest and the newest confirmed are never dropped.
+   Deleting your own unsent sealed messages does not move the recipient's window: only receipts do.
+
+Known-answer vectors for all of this are in `web/tests/unit/fixtures/relay-vectors.json`
+(written by `WebVectorsTests`).
+
+### Envelope format
+
+Always exactly 512, 2,048 or 8,192 bytes (the smallest that fits). Binary:
+
+| Offset | Bytes | Field |
+| --- | --- | --- |
+| 0 | 1 | version = 1 |
+| 1 | 16 | tag (`tag_i`) |
+| 17 | 16 | receiptHash = SHA-256(`RS_i`)[0..<16] |
+| 33 | 4 | expiresHour: hours since 1970, big-endian, 48 hours ahead rounded down to a multiple of 6 |
+| 37 | 12 | nonce, random |
+| 49 | n | ChaCha20-Poly1305 ciphertext of the padded inner text; associated data = bytes 0..<49 |
+| end−16 | 16 | Poly1305 tag |
+
+Inner text, before padding with zeros up to the envelope size minus 65:
+type (1 byte, 1 = text) ‖ message ID (16 bytes, the UUID's bytes) ‖ sentAt (8 bytes, milliseconds
+since 1970, big-endian) ‖ length (2 bytes, big-endian) ‖ the UTF-8 text. That leaves room for
+420, 1,956 or 8,100 bytes of text. A message whose UTF-8 is longer than 8,100 bytes (possible only
+with very long emoji sequences) is not relayed and waits for direct range. Photos are never relayed.
+
+There is no sender, recipient, hop counter, time-to-live or compression. Carriers read only the
+49-byte header.
+
+### Relay payloads
+
+All travel inside the encrypted link as ordinary `Payload` JSON, like photos, and only on a link
+between two saved contacts whose identity proofs both listed `"relay-v1"`. A phone that did not
+list it (an older Earshot, the web client, or a phone with relaying off) is never sent any of
+them; receiving one on such a link closes it. Each byte string is standard base64 in the JSON.
+
+```json
+{"relaySync":{"_0":"<8-byte generation ID>"}}
+{"relayConfirmed":{"_0":"<8-byte generation ID: I now seal to you under it>"}}
+{"relayOffer":{"_0":"<9-byte entries: 8-byte envelope ID + size code 0/1/2 (512/2,048/8,192)>"}}
+{"relayWant":{"_0":"<8-byte envelope IDs>"}}
+{"relayEnvelope":{"_0":"<one envelope>"}}
+{"relayDone":{}}
+{"relayReceipts":{"_0":"<16-byte receipt secrets>"}}
+```
+
+- The envelope ID is SHA-256 of the whole envelope, first 8 bytes. Duplicates are recognised by
+  it, never by the tag, so junk that copies a real tag cannot make carriers drop the real one.
+- An offer lists at most 512 entries. The other phone always answers an offer with a `relayWant`
+  (empty if it needs nothing), and no new offer goes out on that link until it has. A phone asks
+  for at most 100 envelopes and about 64 KB at a time, waits for `relayDone`, then asks for more. It
+  asks for *every* envelope it has not seen, whether or not it is its own, so the carrier cannot
+  tell from the request whose it was.
+- `relayEnvelope` is accepted only in answer to this phone's own `relayWant`. A `relayWant` may name
+  only IDs offered on that link, each at most once per link, at most 100 and about 64 KB at a time;
+  anything else closes the link. An envelope already handed on 8 times is not handed on again.
+- Pacing: each link gets at most one exchange (offers, receipts) every 250 ms, and relay control
+  messages have their own allowance per link (300 at once, then 30 per second), separate from
+  text. So an honest phone sends at most about 16 relay control messages per second on a link,
+  however busy or slow, and never trips the other phone's limit. A test checks this with every link
+  slowed to one frame per 30 ms in each direction.
+- A receipt is kept and passed on only if it matches an envelope this phone holds, sent or has
+  seen. Receipts are released as soon as the message is safely stored: carriers are your contacts,
+  and a delay would only make Delivered slower without hiding much from them.
+- The largest relay frame (an 8,192-byte envelope, as base64 inside JSON, sealed) is about 11 KB,
+  well inside the 64 KB frame limit of every radio layer.
+
+### Limits on what a phone carries
+
+| Limit | Value |
+| --- | --- |
+| Envelopes carried for others | 1,000, and 2 MB in total. |
+| From any one contact | 250 envelopes and one fifth of the store at a time (counted in memory only; the phone saves no record of who gave what). When the store is full, room is made by dropping from whoever holds the most, never from the contact depositing. After a restart the old envelopes count as one unknown holder, so one contact can never push out everyone else's share. |
+| Handed on per envelope | at most 8 phones |
+| Lifetime | 48 hours, then deleted |
+| Envelope IDs remembered (to take each only once) | 10,000 for 72 hours. When full the oldest is forgotten, so an overload can only make a phone take a duplicate, never refuse new mail. |
+| Receipts kept to pass on | 4,000 for 72 hours |
+
+Relay data is stored in `Application Support/Earshot/relay` with the same protection as chats,
+excluded from backups, and deleted by "Erase everything". "Erase carried mail" deletes the carried
+envelopes and the envelope IDs and receipts remembered about them. Frequent changes are saved
+together about once a second; sealing your own message is always saved first.
+
+**Blocking, removing, deleting.** Blocking or removing a contact deletes the relay keys with them
+(nothing more is sealed for them or opened from them) and drops your sealed copies to them;
+deleting an unsent message drops its sealed copy. In each case Earshot releases that copy's receipt
+at once to the friends linked right now, which asks carriers to delete it. This is best effort and
+cannot be guaranteed: a friend who is not linked, or who already handed the copy on, may still
+deliver it, so a message written to someone before you blocked them can still reach them through
+friends. You will not see it marked Delivered.
+
+### Honest limits of relaying
+
+- Relayed messages are only as private as your contacts are trustworthy *about metadata*: a
+  friend who carries mail learns that you sent something and when, and may guess the recipient.
+  They never learn the content.
+- Forward secrecy is weaker than on a direct link: whoever takes your phone, or your contact's,
+  can read relayed messages still on their way and new ones until the two of you link directly again,
+  and for up to a week after that (older keys are kept that long for envelopes still travelling).
+- Nothing is guaranteed to arrive: a carrier may never meet the recipient, may be switched off,
+  or may drop mail. The message stays in your outbox and is delivered directly when you meet.
+- The relay protocol has not been independently audited.
+
 ## What Earshot does not protect against
 
 - **Recorded beacons.** The tag that lets contacts recognise each other can be recorded
@@ -331,6 +543,14 @@ link, too many photo bytes or announcements too fast, progress beyond what was s
 - The link encryption has not had an independent security audit.
 - Keys are fresh for every link, so capturing one link's keys does not expose earlier
   links. Within one long-lived link the keys are not rotated.
+- **A friend you share can confirm that you two know each other.** `PairTag` and `Knock` are
+  computed from the two identity public keys, which every contact of each of you holds. A friend
+  of both can therefore compute them for the pair, and see your phone react. Relay keys do not
+  have this weakness.
+- **Current and former contacts can recognise your phone** while it is visible: the discovery tag
+  is keyed with your identity public key, which they keep.
+- **Relaying** (see above): carriers learn when you hand over mail and may guess the recipient;
+  relayed messages still on their way can be read by whoever takes either phone.
 
 ## Code map
 
@@ -349,6 +569,10 @@ link, too many photo bytes or announcements too fast, progress beyond what was s
 | `Messenger+Photos.swift` | Sending and receiving photos: pacing, checks, timeouts, clean-up. |
 | `PhotoWire.swift` | Photo payloads, the `photo-v1` feature, and every photo limit (`PhotoLimits`). |
 | `PhotoProcessing.swift` | Shrinking and cleaning photos before sending, checking received ones, safe decoding. |
+| `Messenger+Relay.swift` | Relaying: sealing own messages, the offer/want exchange, opening, receipts, the carry setting. |
+| `RelayCrypto.swift` | Relay key schedule and the envelope format. |
+| `RelayState.swift` | Relay keys, own sealed copies and carried mail, and the rules for changing them. |
+| `RelayWire.swift` | The carry setting, relay limits and the list formats inside relay payloads. |
 | `AttachmentStore.swift` | Photo files on disk (or in memory for tests and demo mode). |
 | `MessageFormatting.swift` | Finds links and bold, italic, strikethrough and code markers in message text, for display. |
 | `Persistence.swift` | On-disk storage and Keychain. |

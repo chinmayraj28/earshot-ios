@@ -128,6 +128,12 @@ struct Handshake {
 
     /// Derives the encrypted channel once the other side's ephemeral key is known.
     func channel(remoteEphemeral: Data) throws -> SecureChannel {
+        try linkSecrets(remoteEphemeral: remoteEphemeral).channel
+    }
+
+    /// The channel, plus the raw X25519 shared secret. The secret is used once more, after both
+    /// identity proofs, to derive relay keys (`RelayCrypto.root`), and then forgotten.
+    func linkSecrets(remoteEphemeral: Data) throws -> (channel: SecureChannel, sharedSecret: SymmetricKey) {
         let local = publicKey
         guard remoteEphemeral.count == 32 else { throw CryptoError.malformed }
         guard remoteEphemeral != local else { throw CryptoError.reflectedKey }
@@ -141,8 +147,9 @@ struct Handshake {
         }
         let lowToHigh = key("earshot v1 low>high")
         let highToLow = key("earshot v1 high>low")
-        return SecureChannel(sendKey: localIsLow ? lowToHigh : highToLow,
-                             receiveKey: localIsLow ? highToLow : lowToHigh)
+        let channel = SecureChannel(sendKey: localIsLow ? lowToHigh : highToLow,
+                                    receiveKey: localIsLow ? highToLow : lowToHigh)
+        return (channel, secret.withUnsafeBytes { SymmetricKey(data: Data($0)) })
     }
 
     /// What each side signs with its identity key. Covering both ephemeral keys

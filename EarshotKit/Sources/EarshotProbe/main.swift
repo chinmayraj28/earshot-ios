@@ -10,6 +10,10 @@
 //                                                               stdin/stdout, for the web client's tests;
 //                                                               20 = notification chunk size. See PipeTransport.swift)
 //   swift run earshot-probe --name "Probe" --echo --photo-echo --send-photo   (photos; see Photos.swift)
+//   swift run earshot-probe --name "Middle" --bluetooth --carry friends   (relaying; see Relay.swift)
+//   EARSHOT_BT_DEBUG=1 swift run earshot-probe --name "Probe" --echo --bluetooth
+//                                                              (also prints every Bluetooth link event:
+//                                                               LINK <time> <kind> peer=<label> rssi=<dBm>)
 //
 // It accepts every incoming request, prints what happens, and (with --echo)
 // replies to each message with "Echo: <text>".
@@ -41,11 +45,28 @@ while let argument = arguments.next() {
     case "--timeout": timeout = arguments.next().flatMap(Double.init)
     case "--pipe": pipeChunkLength = arguments.next().flatMap { Int($0) } ?? 20
     default:
-        guard ProbePhotos.parse(argument) else {
+        guard ProbePhotos.parse(argument) || ProbeRelay.parse(argument, next: { arguments.next() }) else {
             print("unknown argument \(argument)")
             exit(64)
         }
     }
+}
+
+/// Prints the Bluetooth layer's link diagnostics (see `LinkEvent`) as they happen.
+@MainActor
+func ephemeralMessenger(radio: Radio) -> Messenger {
+    guard radio == .bluetooth, ProcessInfo.processInfo.environment["EARSHOT_BT_DEBUG"] == "1" else {
+        return Messenger.ephemeral(radio: radio)
+    }
+    let bluetooth = BluetoothTransport()
+    let clock = DateFormatter()
+    clock.dateFormat = "HH:mm:ss.SSS"
+    Task { @MainActor in
+        for await event in bluetooth.linkEvents() {
+            print("LINK \(clock.string(from: event.date)) \(event.summary)")
+        }
+    }
+    return Messenger(transport: bluetooth, persistence: InMemoryPersistence(), identityStore: InMemoryIdentityStore())
 }
 
 let messenger: Messenger
@@ -54,16 +75,17 @@ if let pipeChunkLength {
     messenger = Messenger(transport: PipeTransport(notifyChunkLength: pipeChunkLength),
                           persistence: InMemoryPersistence(), identityStore: InMemoryIdentityStore())
 } else {
-    messenger = Messenger.ephemeral(radio: radio)
+    messenger = ephemeralMessenger(radio: radio)
 }
 #else
 if pipeChunkLength != nil {
     print("--pipe is only available in debug builds")
     exit(64)
 }
-messenger = Messenger.ephemeral(radio: radio)
+messenger = ephemeralMessenger(radio: radio)
 #endif
 messenger.completeOnboarding(displayName: name)
+ProbeRelay.attach(to: messenger)
 
 messenger.onEvent = { event in
     switch event {

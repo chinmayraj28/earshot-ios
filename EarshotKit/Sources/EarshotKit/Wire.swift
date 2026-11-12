@@ -76,6 +76,24 @@ enum Payload: Codable, Equatable {
     /// Receiver → sender: I will not take this photo (too big, storage full, failed checks).
     case photoRefuse(UUID)
 
+    // Relaying (see `Messenger+Relay.swift` and `RelayWire.swift`). Never sent to a phone whose
+    // `auth` on this link did not list `Feature.relay`, and only between saved contacts.
+    /// "I derived this generation of relay keys on this link": its 8-byte ID.
+    case relaySync(Data)
+    /// "I received your `relaySync` and now seal messages to you under this generation", so the
+    /// other phone may later retire older generations.
+    case relayConfirmed(Data)
+    /// Envelopes this phone can hand over: 9-byte entries (8-byte envelope ID + size code).
+    case relayOffer(Data)
+    /// "Please send these": 8-byte envelope IDs, each one offered on this link.
+    case relayWant(Data)
+    /// One sealed envelope (512, 2,048 or 8,192 bytes), sent only in answer to `relayWant`.
+    case relayEnvelope(Data)
+    /// "That is everything you asked for that I still have."
+    case relayDone
+    /// Released receipt secrets, 16 bytes each.
+    case relayReceipts(Data)
+
     func encoded() throws -> Data { try JSONEncoder().encode(self) }
     static func decode(_ data: Data) throws -> Payload { try JSONDecoder().decode(Payload.self, from: data) }
 }

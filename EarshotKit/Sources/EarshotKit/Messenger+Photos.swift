@@ -184,6 +184,7 @@ extension Messenger {
                                             data: data, pieceCount: pieceCount)
             outgoingTransfers[message.id] = transfer
             photoProgress[message.id] = 0
+            takeSendAllowance(on: token, force: true)
             do {
                 try send(.photoStart(start), to: token)
             } catch {

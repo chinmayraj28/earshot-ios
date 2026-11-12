@@ -18,6 +18,8 @@ public final class LoopbackHub {
     private var nodes: [PeerToken: LoopbackTransport] = [:]
     private var invites: Set<Invite> = []
     private var connections: Set<Pair> = []
+    /// Pairs of phones that are out of range of each other while both may still see others.
+    private var separated: Set<Pair> = []
     private typealias Job = @MainActor @Sendable () -> Void
     private var queue: [Job] = []
     private var isDraining = false
@@ -26,6 +28,19 @@ public final class LoopbackHub {
 
     /// Lets a test inspect, change or drop (return nil) any frame in flight.
     public var intercept: ((_ data: Data, _ from: PeerToken, _ to: PeerToken) -> Data?)?
+
+    /// Tests only: model a slow radio with a send queue, like Bluetooth. When set, frames from one
+    /// phone to another queue up and are delivered one per `pacedFrameInterval`, in order.
+    public var pacedFrameInterval: Duration?
+    /// Tests only, with pacing: like `BluetoothTransport`, a link whose queue towards one phone
+    /// would exceed this many bytes is closed (`send` throws, both sides get `.disconnected`).
+    public var perPeerQueueCap: Int?
+    /// Tests only: how many links were closed because a queue went over the cap.
+    public private(set) var queueCapClosures = 0
+    private struct Directed: Hashable { let from: PeerToken; let to: PeerToken }
+    private var paced: [Directed: [Data]] = [:]
+    private var pacedBytes: [Directed: Int] = [:]
+    private var pumping = false
 
     /// - Parameter latency: when set, every event is delivered after this delay, in order.
     public init(latency: Duration? = nil) {
@@ -75,7 +90,8 @@ public final class LoopbackHub {
 
     private func announce(_ node: LoopbackTransport) {
         guard let own = node.advertisement, node.isReachable else { return }
-        for other in nodes.values where other.token != node.token && isOnAir(other.token) {
+        for other in nodes.values where other.token != node.token && isOnAir(other.token)
+            && !separated.contains(Pair(node.token, other.token)) {
             if own.isVisible { emit(.found(node.token, own), to: other.token) }
             if let theirs = other.advertisement, theirs.isVisible { emit(.found(other.token, theirs), to: node.token) }
         }
@@ -105,7 +121,8 @@ public final class LoopbackHub {
     fileprivate func stopping(_ node: LoopbackTransport) { atomically { withdraw(node, notifySelf: false) } }
 
     fileprivate func invite(from: PeerToken, to: PeerToken, context: Data) {
-        guard isOnAir(from), isOnAir(to), nodes[to]?.advertisement?.isVisible == true else {
+        guard isOnAir(from), isOnAir(to), nodes[to]?.advertisement?.isVisible == true,
+              !separated.contains(Pair(from, to)) else {
             emit(.disconnected(to), to: from)
             return
         }
@@ -134,11 +151,60 @@ public final class LoopbackHub {
             guard let changed = intercept(data, from, to) else { return }
             data = changed
         }
-        emit(.received(data, from: from), to: to)
+        guard pacedFrameInterval != nil else {
+            emit(.received(data, from: from), to: to)
+            return
+        }
+        let key = Directed(from: from, to: to)
+        let queued = pacedBytes[key, default: 0] + data.count
+        if let cap = perPeerQueueCap, queued > cap {
+            queueCapClosures += 1
+            clearPaced(Pair(from, to))
+            connections.remove(Pair(from, to))
+            atomically {
+                emit(.disconnected(to), to: from)
+                emit(.disconnected(from), to: to)
+            }
+            throw TransportError.notConnected
+        }
+        paced[key, default: []].append(data)
+        pacedBytes[key] = queued
+        pump()
+    }
+
+    private func clearPaced(_ pair: Pair) {
+        for key in paced.keys where pair.contains(key.from) && pair.contains(key.to) {
+            paced[key] = nil
+            pacedBytes[key] = nil
+        }
+    }
+
+    /// Delivers one queued frame per direction every `pacedFrameInterval`.
+    private func pump() {
+        guard !pumping, let interval = pacedFrameInterval else { return }
+        pumping = true
+        Task { @MainActor [weak self] in
+            while let self, !self.paced.values.allSatisfy(\.isEmpty) {
+                try? await Task.sleep(for: interval)
+                self.atomically {
+                    for key in Array(self.paced.keys) {
+                        guard var frames = self.paced[key], !frames.isEmpty else { continue }
+                        let frame = frames.removeFirst()
+                        self.paced[key] = frames
+                        self.pacedBytes[key, default: 0] -= frame.count
+                        if self.connections.contains(Pair(key.from, key.to)) {
+                            self.emit(.received(frame, from: key.from), to: key.to)
+                        }
+                    }
+                }
+            }
+            self?.pumping = false
+        }
     }
 
     fileprivate func disconnect(_ node: PeerToken, from peer: PeerToken) {
         invites.remove(Invite(from: node, to: peer))
+        clearPaced(Pair(node, peer))
         if connections.remove(Pair(node, peer)) != nil {
             emit(.disconnected(node), to: peer)
         }
@@ -160,8 +226,35 @@ public final class LoopbackHub {
         }
     }
 
+    /// Simulates two phones moving out of range of each other (false) or back (true), while each
+    /// stays in range of everyone else. Used for relaying: A and B apart, C near both.
+    public func setInRange(_ inRange: Bool, _ a: LoopbackTransport, _ b: LoopbackTransport) {
+        let pair = Pair(a.token, b.token)
+        atomically {
+            if inRange {
+                guard separated.remove(pair) != nil, isOnAir(a.token), isOnAir(b.token) else { return }
+                if let ad = a.advertisement, ad.isVisible { emit(.found(a.token, ad), to: b.token) }
+                if let ad = b.advertisement, ad.isVisible { emit(.found(b.token, ad), to: a.token) }
+            } else {
+                guard separated.insert(pair).inserted else { return }
+                clearPaced(pair)
+                if connections.remove(pair) != nil {
+                    emit(.disconnected(b.token), to: a.token)
+                    emit(.disconnected(a.token), to: b.token)
+                }
+                for invite in invites where pair.contains(invite.from) && pair.contains(invite.to) {
+                    invites.remove(invite)
+                    emit(.disconnected(invite.to), to: invite.from)
+                }
+                if a.advertisement?.isVisible == true { emit(.lost(a.token), to: b.token) }
+                if b.advertisement?.isVisible == true { emit(.lost(b.token), to: a.token) }
+            }
+        }
+    }
+
     /// Simulates a link dropping while both phones stay in range.
     public func dropConnection(_ a: LoopbackTransport, _ b: LoopbackTransport) {
+        clearPaced(Pair(a.token, b.token))
         guard connections.remove(Pair(a.token, b.token)) != nil else { return }
         atomically {
             emit(.disconnected(b.token), to: a.token)
@@ -219,4 +312,10 @@ public final class LoopbackTransport: Transport {
     public func disconnect(_ peer: PeerToken) {
         hub?.disconnect(token, from: peer)
     }
+
+    /// The loopback radio never reconnects by itself; these only record what the engine asked for.
+    public private(set) var forgotten: [PeerToken] = []
+    public private(set) var forgotAllCount = 0
+    public func forget(_ peer: PeerToken) { forgotten.append(peer) }
+    public func forgetAllPeers() { forgotAllCount += 1 }
 }

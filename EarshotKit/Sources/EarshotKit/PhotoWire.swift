@@ -10,8 +10,13 @@ enum Feature {
     /// Can receive and send photos with the `photo…` payloads below.
     static let photo = "photo-v1"
 
-    /// What this version of Earshot announces.
-    static let all = [photo]
+    /// Takes part in relaying: carries sealed messages for contacts and has its own carried.
+    /// Announced only while the carry setting is not `.off` (see `CarryMode`, `Messenger+Relay.swift`).
+    static let relay = "relay-v1"
+
+    /// Everything this version of Earshot can announce. What a phone actually announces on a
+    /// link is `Messenger.announcedFeatures` (relaying can be switched off).
+    static let all = [photo, relay]
 }
 
 /// The numbers that keep photos honest about what Bluetooth LE can carry.

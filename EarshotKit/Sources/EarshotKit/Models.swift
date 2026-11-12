@@ -61,15 +61,21 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
     /// Set when the message is a photo. `text` is then the optional caption (often empty).
     /// Optional, so conversations saved by earlier versions (which have no such key) still load.
     public let photo: PhotoAttachment?
+    /// True when friends' phones carried this message (see `Messenger+Relay.swift`):
+    /// - incoming: it arrived in a sealed envelope handed over by a contact's phone, not directly;
+    /// - outgoing: "Delivered" was confirmed by a receipt that came back through friends' phones.
+    /// nil means direct, and is what every message saved by earlier versions decodes as.
+    public var relayed: Bool?
 
     public init(id: UUID = UUID(), direction: Direction, text: String, timestamp: Date = Date(),
-                status: DeliveryStatus, photo: PhotoAttachment? = nil) {
+                status: DeliveryStatus, photo: PhotoAttachment? = nil, relayed: Bool? = nil) {
         self.id = id
         self.direction = direction
         self.text = text
         self.timestamp = timestamp
         self.status = status
         self.photo = photo
+        self.relayed = relayed
     }
 }
 
