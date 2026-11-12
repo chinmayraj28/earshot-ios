@@ -110,6 +110,7 @@ final class ScreenshotTests: XCTestCase {
         let banner = springboard.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "Maya Okafor")).firstMatch
         XCTAssertTrue(banner.waitForExistence(timeout: 20))
+        sleep(1) // let the banner finish sliding in; otherwise the capture can be blurred
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = "notification-banner"
         attachment.lifetime = .keepAlways

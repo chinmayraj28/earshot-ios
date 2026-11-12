@@ -62,10 +62,12 @@ final class LiveLinkTests: XCTestCase {
         wait(for: [photoDelivered], timeout: 30)
     }
 
+    @MainActor
     private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    @MainActor
     private func tap(_ element: XCUIElement, timeout: TimeInterval = 15, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "Missing \(element)", file: file, line: line)
         let hittable = expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: element)

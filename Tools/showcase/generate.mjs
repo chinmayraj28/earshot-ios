@@ -21,10 +21,8 @@ import { fileURLToPath } from "node:url";
 // ────────────────────────────────────────────────────────────────────────────────────
 const CONFIG = {
   hero: {
-    // Dark card. Only four dark iOS screenshots exist, so the set is symmetric on purpose:
-    // the three middle phones are dark mode, the two outer phones light mode.
-    // Once a fifth dark screenshot exists, an all-dark set is the cleaner choice.
-    dark: ["onboarding-welcome.png", "home-dark.png", "chat-dark.png", "incoming-request-dark.png", "contact-details.png"],
+    // Dark card, dark-mode screens only.
+    dark: ["onboarding-welcome-dark.png", "home-dark.png", "chat-dark.png", "incoming-request-dark.png", "contact-details-dark.png"],
     // Warm paper card, light-mode screens only.
     light: ["onboarding-welcome.png", "home-light.png", "chat.png", "incoming-request.png", "contact-details.png"],
   },
