@@ -91,7 +91,10 @@ extension Messenger {
     /// True when a new photo can be sent to this contact right now: they are connected and
     /// their Earshot announced, on this very link, that it can receive photos.
     public func canSendPhoto(to id: ContactID) -> Bool {
-        photoCapableContacts.contains(id) && contact(id)?.isBlocked == false
+        // Read from the links themselves (not `photoCapableContacts`, which is refreshed a
+        // moment later) so this is already true inside the `.connected` event.
+        contact(id)?.isBlocked == false
+            && links.values.contains { $0.contactID == id && $0.peerFeatures.contains(Feature.photo) }
     }
 
     /// Sends a prepared photo (see `PhotoProcessing.prepare`) with an optional caption.

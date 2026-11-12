@@ -6,6 +6,7 @@
 //   swift run earshot-probe --name "Probe" --echo                 (Wi-Fi/Multipeer: pairs with the iOS Simulator)
 //   swift run earshot-probe --name "Probe" --echo --bluetooth     (Bluetooth LE: pairs with a real iPhone)
 //   swift run earshot-probe --name "Caller" --invite "Probe" --send "hello" --exit-after-delivery
+//   swift run earshot-probe --name "Probe" --echo --photo-echo --send-photo   (photos; see Photos.swift)
 //
 // It accepts every incoming request, prints what happens, and (with --echo)
 // replies to each message with "Echo: <text>".
@@ -34,8 +35,10 @@ while let argument = arguments.next() {
     case "--exit-after-delivery": exitAfterDelivery = true
     case "--timeout": timeout = arguments.next().flatMap(Double.init)
     default:
-        print("unknown argument \(argument)")
-        exit(64)
+        guard ProbePhotos.parse(argument) else {
+            print("unknown argument \(argument)")
+            exit(64)
+        }
     }
 }
 
@@ -54,7 +57,9 @@ messenger.onEvent = { event in
             messenger.send(textToSend, to: id)
             print("SENT \(textToSend)")
         }
+        ProbePhotos.connected(id, messenger: messenger)
     case .messageReceived(let id, let message):
+        if ProbePhotos.received(message, from: id, messenger: messenger) { return }
         print("RECEIVED \(message.text)")
         if echo { messenger.send("Echo: \(message.text)", to: id) }
     }
@@ -96,14 +101,14 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
             where message.direction == .outgoing && !reportedDelivered.contains(message.id) {
                 if message.status == .delivered {
                     reportedDelivered.insert(message.id)
-                    print("DELIVERED \(message.text)")
+                    print("DELIVERED \(message.photo == nil ? message.text : "PHOTO")")
                     if exitAfterDelivery {
                         messenger.stop()
                         exit(0)
                     }
                 } else if message.status == .failed {
                     reportedDelivered.insert(message.id)
-                    print("FAILED \(message.text)")
+                    print("FAILED \(message.photo == nil ? message.text : "PHOTO")")
                 }
             }
         }
