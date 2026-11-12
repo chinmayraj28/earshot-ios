@@ -218,7 +218,7 @@ struct OnboardingView: View {
                 .padding(.top, 24)
             ExplainerRow(systemImage: "antenna.radiowaves.left.and.right",
                          title: "Bluetooth, phone to phone",
-                         detail: "No Wi‑Fi, internet or mobile signal. Range is about one room — a few tens of metres in the open, less through walls and bodies.")
+                         detail: "No Wi‑Fi, internet or mobile signal. Range is about one room — a few tens of metres in the open, less through walls and bodies. Mutual friends' phones can carry sealed texts while you're apart.")
             ExplainerRow(systemImage: "lock.iphone",
                          title: "Works in your pocket",
                          detail: "Once you've opened Earshot, a contact nearby can reach you while your phone is locked, and you can get a notification.")

@@ -9,6 +9,7 @@ enum Route: Hashable {
     case howItWorks
     case privacy
     case blocked
+    case rangeTest
 }
 
 /// Wraps a request token so it can drive `.sheet(item:)`.
@@ -22,6 +23,9 @@ struct PresentedRequest: Identifiable, Equatable {
 final class AppRouter {
     var path: [Route] = []
     var presentedRequest: PresentedRequest?
+    /// Debug screenshots: a section for Settings to scroll to when it opens.
+    var settingsScrollTarget: String?
+    var contactScrollTarget: String?
     /// Bumped whenever a new conversation opens, to play a success haptic.
     private(set) var connectionCount = 0
     /// Called when a request turns into a new contact (used to offer notifications).

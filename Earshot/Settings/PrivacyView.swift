@@ -8,13 +8,16 @@ struct PrivacyView: View {
         "Names aren't unique. Someone new can pick the same name as a person you know — compare safety codes if it matters.",
         "People with radio equipment can tell that Earshot phones are nearby and talking, and roughly how much.",
         "A recorded broadcast from one of your contacts can be replayed to make your phone react. Your identity isn't revealed, but the person replaying it learns that you know that contact.",
-        "The encryption hasn't had an independent security audit.",
+        "A friend whose phone carries your sealed message can see that you handed it a message, and when. If they pass it straight to the person it's for, they may be able to guess who that was and that it arrived.",
+        "If your phone or your contact's phone is taken, relayed messages still on their way could be read until you two next connect directly, and for up to a week after. Messages already delivered stay protected.",
+        "A message you wrote to someone before blocking them may still reach them through friends who already carry it. Earshot asks friends to delete it but can't guarantee that.",
+        "Neither the encryption nor the relaying has had an independent security audit.",
     ]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                Text("Earshot has no servers and no accounts. Your messages go from your phone to theirs and nowhere else.")
+                Text("Earshot has no servers and no accounts. Your messages go from your phone to theirs — directly, or sealed through your mutual contacts' phones if you both allow it. Nowhere else.")
                     .font(.display(.title3, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                     .fixedSize(horizontal: false, vertical: true)
@@ -25,6 +28,12 @@ struct PrivacyView: View {
                 ExplainerRow(systemImage: "internaldrive",
                              title: "Stored only on this phone",
                              detail: "Messages and contacts stay on this device and are left out of iCloud and computer backups. iOS keeps them encrypted until the phone has been unlocked once after a restart; after that Earshot can read them, so it can save a message that arrives while the phone is locked.")
+                ExplainerRow(systemImage: "person.2",
+                             title: "Relaying through friends",
+                             detail: "If you and a contact both leave relaying on, a text message to them can travel through your other contacts' phones while you're apart. Strangers never carry your messages, and your phone never carries strangers'. Carrying friends can't read a message or see who it's for. Relaying starts only after you and a contact have connected directly with this version, and nothing is guaranteed to arrive this way.")
+                ExplainerRow(systemImage: "shippingbox",
+                             title: "What your phone carries",
+                             detail: "Up to 2 MB of sealed messages for your contacts, each for at most 48 hours. Your phone can't read them and keeps no record of who handed it which one. Turn relaying off in Settings and your phone takes no part: your messages are only delivered directly and it carries nothing for anyone.")
                 ExplainerRow(systemImage: "photo",
                              title: "Photos without the hidden details",
                              detail: "Before a photo is sent, Earshot removes its location, camera model and date. Photos are kept only on your two phones, protected like messages and left out of backups. Earshot never sees your photo library: you pick one photo at a time.")

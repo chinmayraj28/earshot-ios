@@ -136,7 +136,11 @@ final class EarshotUITests: XCTestCase {
         composer.tap()
         composer.typeText("Back at the stairs")
         tap(app.buttons["chat.send"])
-        waitForLabel(element(app, "chat.lastStatus"), toContain: "Waiting for Maya", timeout: 10)
+        // Maya's demo phone shares relay keys with ours, so the message may be sealed for friends
+        // to carry; either way it is Waiting for Maya and not delivered.
+        let status = element(app, "chat.lastStatus")
+        waitForLabel(status, toContain: "Waiting", timeout: 10)
+        XCTAssertTrue(status.label.contains("Maya"), "Got: \(status.label)")
     }
 
     @MainActor
@@ -206,7 +210,9 @@ final class EarshotUITests: XCTestCase {
         let showText = app.switches["settings.notifications.showText"]
         XCTAssertTrue(showText.exists)
         XCTAssertEqual(showText.value as? String, "0", "Message text in notifications is off by default")
-        tap(app.buttons["How Earshot works"])
+        let howItWorks = app.buttons["How Earshot works"]
+        for _ in 0..<6 where !(howItWorks.exists && howItWorks.isHittable) { app.swipeUp() }
+        tap(howItWorks)
         XCTAssertTrue(app.staticTexts["Short range"].waitForExistence(timeout: 10))
     }
 

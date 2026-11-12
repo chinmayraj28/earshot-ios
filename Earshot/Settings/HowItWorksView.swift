@@ -12,7 +12,7 @@ struct HowItWorksView: View {
 
                 ExplainerRow(systemImage: "antenna.radiowaves.left.and.right",
                              title: "Bluetooth, phone to phone",
-                             detail: "Earshot talks straight from your phone to theirs over Bluetooth. It uses no Wi‑Fi, internet or mobile signal, and messages aren't passed along through other phones. Bluetooth can stay on in Airplane Mode.")
+                             detail: "Earshot talks straight from your phone to theirs over Bluetooth. It uses no Wi‑Fi, internet or mobile signal, and Bluetooth can stay on in Airplane Mode. Strangers' phones never carry your messages.")
                 ExplainerRow(systemImage: "dot.radiowaves.left.and.right",
                              title: "Short range",
                              detail: "About one room — a few tens of metres in the open, less through walls and bodies.")
@@ -28,9 +28,12 @@ struct HowItWorksView: View {
                 ExplainerRow(systemImage: "clock",
                              title: "Messages that wait",
                              detail: "If someone is out of range, your message shows “Waiting” and sends by itself the next time your phones link up.")
+                ExplainerRow(systemImage: "person.2",
+                             title: "Through friends, if you both allow it",
+                             detail: "If you and a contact both leave “Relay through friends” on, a text message to them can travel sealed through your other contacts' phones while you're apart, for up to 48 hours. It starts after you two have connected directly once. Your message shows “Waiting · sealed” until it's delivered, and still sends directly if you meet first. Nothing is guaranteed to arrive this way. Photos only ever go directly.")
                 ExplainerRow(systemImage: "checkmark.circle",
                              title: "“Delivered” means delivered",
-                             detail: "Delivered appears only after the other phone confirms it received and saved your message. “Not delivered” means no confirmation came back — for example, their phone couldn't save it. Tap it to try again.")
+                             detail: "Delivered appears only after the other phone confirms it received and saved your message. “Delivered · via friends” means that confirmation came back through friends' phones. “Not delivered” means no confirmation came back — for example, their phone couldn't save it. Tap it to try again.")
                 ExplainerRow(systemImage: "photo",
                              title: "Photos, slowly but surely",
                              detail: "Tap the photo button while you're connected to send one photo at a time. Earshot shrinks it to about 150 KB and removes its location and camera details first. Over Bluetooth that takes a few seconds to about half a minute. If the connection drops, the photo starts again when you're back in range. Video isn't supported.")

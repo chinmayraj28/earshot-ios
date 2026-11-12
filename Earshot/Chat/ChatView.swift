@@ -59,7 +59,8 @@ private struct ChatContent: View {
         // frame (not its insets) changes when they appear; that keeps bottom anchoring exact.
         VStack(spacing: 0) {
             ConnectionBanner(name: contact.displayName, link: link,
-                             availability: messenger.availability, droppedHere: linkDroppedHere)
+                             availability: messenger.availability, droppedHere: linkDroppedHere,
+                             canRelay: messenger.canRelay(to: contact.id))
             if notifications.isOfferingPermission {
                 NotificationOfferCard()
             }
@@ -240,12 +241,18 @@ private struct ChatContent: View {
                                   onCancelPhoto: { messenger.cancelPhoto(message.id, in: contact.id) })
                     if !outgoing { Spacer(minLength: typeSize.isAccessibilitySize ? 24 : 56) }
                 }
+                if !outgoing && message.relayed == true {
+                    ViaFriendsMarker()
+                        .padding(.horizontal, 4)
+                }
                 if showStatus {
                     DeliveryStatusLine(status: message.status, contactName: contact.displayName,
                                        isLast: message.id == lastOutgoingID,
                                        isPhoto: message.photo != nil,
                                        progress: messenger.photoProgress[message.id],
                                        failure: messenger.photoFailures[message.id],
+                                       relayHandoffs: messenger.relayHandoffs[message.id],
+                                       relayed: message.relayed == true,
                                        onRetry: { messenger.retry(message.id, in: contact.id) })
                         .padding(.horizontal, 4)
                         .padding(.bottom, 2)
@@ -362,6 +369,15 @@ private struct ConnectionBanner: View {
     let link: LinkState
     let availability: Availability
     let droppedHere: Bool
+    /// Messages to this contact can travel sealed through friends' phones while you're apart.
+    let canRelay: Bool
+
+    /// The one-line summary shown first when the contact is out of range.
+    private var headline: String? {
+        guard availability == .on, link == .outOfRange else { return nil }
+        return canRelay ? "Out of range · messages can travel through friends"
+                        : "Out of range · messages wait until you are near each other"
+    }
 
     private var message: String? {
         let first = name.firstName
@@ -375,9 +391,10 @@ private struct ConnectionBanner: View {
             case .connected, .connecting, .inRange:
                 return nil
             case .outOfRange:
-                return droppedHere
-                    ? "\(first) moved out of range. Messages will wait and send when your phones are near each other again."
-                    : "\(first) isn't nearby. Messages will wait and send when your phones are near each other again."
+                let start = droppedHere ? "\(first) moved out of range." : "\(first) isn't nearby."
+                return canRelay
+                    ? "\(start) Your messages are sealed so your mutual friends' phones can carry them, and they still send directly when you meet."
+                    : "\(start) Messages will wait and send when your phones are near each other again."
             }
         }
     }
@@ -385,13 +402,20 @@ private struct ConnectionBanner: View {
     var body: some View {
         if let message {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: droppedHere ? "wave.3.right" : "clock")
+                Image(systemName: canRelay && link == .outOfRange ? "person.2" : (droppedHere ? "wave.3.right" : "clock"))
                     .foregroundStyle(Palette.accent)
                     .accessibilityHidden(true)
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(Palette.ink)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let headline {
+                        Text(headline)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Palette.ink)
+                    }
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(headline == nil ? Palette.ink : Palette.inkSecondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 14)

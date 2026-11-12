@@ -5,6 +5,7 @@ import SwiftUI
 struct ConversationRow: View {
     let summary: ConversationSummary
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(Messenger.self) private var messenger
 
     private var name: String { summary.contact.displayName }
 
@@ -89,7 +90,7 @@ struct ConversationRow: View {
     @ViewBuilder private var preview: some View {
         if let message = summary.lastMessage {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                if message.direction == .outgoing, let icon = statusIcon(message.status) {
+                if let icon = statusIcon(message) {
                     Image(systemName: icon)
                         .font(.caption)
                         .foregroundStyle(message.status == .failed ? Palette.danger : Palette.inkSecondary)
@@ -127,21 +128,29 @@ struct ConversationRow: View {
         return text.isEmpty ? "Photo" : "Photo · \(text)"
     }
 
+    /// Sealed for friends to carry (not delivered): how many friends' phones have a copy.
+    private func handoffs(_ message: Message) -> Int? {
+        message.direction == .outgoing && message.status == .waiting ? messenger.relayHandoffs[message.id] : nil
+    }
+
     private func previewText(_ message: Message) -> String {
         let text = Self.readableText(message)
         guard message.direction == .outgoing else { return text }
         switch message.status {
         case .failed: return "Not delivered: \(text)"
-        case .waiting: return "Waiting: \(text)"
+        case .waiting: return handoffs(message) != nil ? "Waiting, sealed for friends: \(text)" : "Waiting: \(text)"
+        case .delivered where message.relayed == true: return "You, via friends: \(text)"
         default: return "You: \(text)"
         }
     }
 
-    private func statusIcon(_ status: DeliveryStatus) -> String? {
-        switch status {
-        case .waiting: "clock"
-        case .failed: "exclamationmark.circle.fill"
-        case .sending, .delivered: nil
+    private func statusIcon(_ message: Message) -> String? {
+        if message.relayed == true { return "person.2" }
+        guard message.direction == .outgoing else { return nil }
+        switch message.status {
+        case .waiting: return handoffs(message) != nil ? "envelope" : "clock"
+        case .failed: return "exclamationmark.circle.fill"
+        case .sending, .delivered: return nil
         }
     }
 
@@ -157,11 +166,14 @@ struct ConversationRow: View {
             var line = "\(who): \(Self.readableText(message))"
             if message.direction == .outgoing {
                 switch message.status {
+                case .waiting where handoffs(message) != nil: line += ". Waiting, sealed for friends to carry"
                 case .waiting: line += ". Waiting to send"
                 case .failed: line += ". Not delivered"
                 case .sending: line += ". Sending"
-                case .delivered: break
+                case .delivered: if message.relayed == true { line += ". Delivered through friends" }
                 }
+            } else if message.relayed == true {
+                line += ". Arrived through friends"
             }
             parts.append(line)
             parts.append(TimeFormat.spoken(message.timestamp))

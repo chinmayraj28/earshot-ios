@@ -25,7 +25,8 @@ struct ContactDetailView: View {
 
     private func content(_ contact: Contact) -> some View {
         let link = messenger.linkState(for: contact.id)
-        return List {
+        return ScrollViewReader { proxy in
+        List {
             Section {
                 VStack(spacing: 10) {
                     Avatar(name: contact.displayName, link: contact.isBlocked ? nil : link, size: 84)
@@ -87,11 +88,25 @@ struct ContactDetailView: View {
                     .accessibilityIdentifier("contact.remove")
             }
             .listRowBackground(Palette.surface)
+
+            if !contact.isBlocked {
+                RelayContactSection(contact: contact)
+                    .id("relay")
+            }
         }
         .listStyle(.insetGrouped)
         .earshotList()
         .navigationTitle("Contact")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Debug builds: `-screen contactRelay:Name` opens this screen scrolled to Relay through friends.
+            guard router.contactScrollTarget != nil else { return }
+            router.contactScrollTarget = nil
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(400))
+                proxy.scrollTo("relay", anchor: .bottom)
+            }
+        }
         .confirmationDialog(dialogTitle(contact), isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
                             titleVisibility: .visible, presenting: confirming) { action in
             switch action {
@@ -112,6 +127,7 @@ struct ContactDetailView: View {
             case .block: Text("\(contact.displayName.firstName)'s phone won't be able to link to yours or send you messages, and they won't be told. They could still appear as a new request under another name; accepting it won't link you. You can unblock them from Settings.")
             case .remove: Text("Deletes \(contact.displayName) and your conversation from this phone. To talk again, one of you taps Connect and the other sees a normal request.")
             }
+        }
         }
     }
 

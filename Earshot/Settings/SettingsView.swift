@@ -11,7 +11,24 @@ struct SettingsView: View {
     private var nameChanged: Bool { !cleanName.isEmpty && cleanName != messenger.profile.displayName }
     private var blockedCount: Int { messenger.contacts.filter(\.isBlocked).count }
 
+    @Environment(AppRouter.self) private var router
+
     var body: some View {
+        ScrollViewReader { proxy in
+            list
+                .onAppear {
+                    // Debug builds: `-screen settings:relay` opens Settings scrolled to Relaying.
+                    guard let target = router.settingsScrollTarget else { return }
+                    router.settingsScrollTarget = nil
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(400))
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                }
+        }
+    }
+
+    private var list: some View {
         List {
             Section {
                 HStack(spacing: 12) {
@@ -63,10 +80,17 @@ struct SettingsView: View {
 
             NotificationSettingsSection()
 
+            RelaySettingsSection()
+                .id("relay")
+
             Section {
                 NavigationLink(value: Route.howItWorks) {
                     SettingsLabel(title: "How Earshot works", systemImage: "dot.radiowaves.left.and.right")
                 }
+                NavigationLink(value: Route.rangeTest) {
+                    SettingsLabel(title: "Range test", systemImage: "ruler")
+                }
+                .accessibilityIdentifier("settings.rangeTest")
                 NavigationLink(value: Route.privacy) {
                     SettingsLabel(title: "Privacy", systemImage: "lock")
                 }

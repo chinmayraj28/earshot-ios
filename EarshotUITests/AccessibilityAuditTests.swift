@@ -25,6 +25,7 @@ final class AccessibilityAuditTests: XCTestCase {
 
         app.buttons["conversation.Maya Okafor"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat.composer").firstMatch.waitForExistence(timeout: 10))
+        sleep(2) // let the push and the transcript settle; mid-animation text reads as low contrast
         try audit(app, "Chat")
 
         app.buttons["chat.details"].tap()

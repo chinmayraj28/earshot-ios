@@ -7,8 +7,12 @@ import Foundation
 /// - `-demoRequest`: with `-demo`, a new person sends you a request about 2 s after launch.
 /// - `-demoNotificationPrompt`: with `-demo`, the notification explainer is shown after the first
 ///   new contact connects (demo mode otherwise skips it so it can't get in the way of UI tests).
+/// - `-demoRelay <sealed,delivered,carrying>`: with `-demo populated`, puts relaying into demo
+///   states: Jonas's waiting message sealed with friends (`-demoRelayHandoffs N`, default 2), his
+///   last message delivered through friends with a reply that came the same way, and this phone
+///   carrying sealed messages for friends. Any combination, comma-separated.
 /// - `-ephemeral`: real radios, nothing saved.
-/// - Debug builds only: `-screen <settings|howItWorks|privacy|chat:Name|contact:Name>` opens a
+/// - Debug builds only: `-screen <settings|howItWorks|privacy|rangeTest|chat:Name|contact:Name>` opens a
 ///   screen at launch, and `-onboardingStep <0|1|2>` starts onboarding on a given step.
 ///   `-simulateBluetoothDenied` shows the "Bluetooth access denied" state, and
 ///   `-demoLeave <Name>` makes a demo person walk out of range about 6 s after launch.
@@ -21,6 +25,7 @@ struct LaunchOptions: Sendable {
     /// With `-demo`: show the notification explainer after the first new contact connects,
     /// whatever the system permission state is. Without it, demo mode never shows the explainer.
     var demoNotificationPrompt = false
+    var demoRelay = DemoWorld.RelayDemo()
     var isEphemeral = false
     var screen: String?
     var onboardingStep: Int?
@@ -40,6 +45,12 @@ struct LaunchOptions: Sendable {
             demoScenario = value(after: "-demo").flatMap(DemoWorld.Scenario.init(rawValue:)) ?? .populated
             demoRequest = arguments.contains("-demoRequest")
             demoNotificationPrompt = arguments.contains("-demoNotificationPrompt")
+            let relayStates = Set((value(after: "-demoRelay") ?? "").split(separator: ",").map(String.init))
+            if relayStates.contains("sealed") {
+                demoRelay.sealedHandoffs = value(after: "-demoRelayHandoffs").flatMap(Int.init) ?? 2
+            }
+            demoRelay.deliveredViaFriends = relayStates.contains("delivered")
+            demoRelay.carrying = relayStates.contains("carrying")
         }
         isEphemeral = arguments.contains("-ephemeral")
         #if DEBUG
@@ -64,6 +75,8 @@ final class AppEnvironment {
     let options: LaunchOptions
     let router = AppRouter()
     let notifications: NotificationManager
+    /// Bluetooth link events for Settings › Range test.
+    let rangeLog: RangeLog
     /// Kept alive for the app's lifetime when running in demo mode.
     let demoWorld: DemoWorld?
 
@@ -71,16 +84,18 @@ final class AppEnvironment {
         self.options = options
         let world: DemoWorld?
         let messenger: Messenger
+        let transport: Transport?
         #if DEBUG
         if options.simulateBluetoothDenied {
-            world = nil
+            (world, transport) = (nil, nil)
             messenger = DeniedTransport.messenger()
         } else {
-            (world, messenger) = Self.make(options)
+            (world, messenger, transport) = Self.make(options)
         }
         #else
-        (world, messenger) = Self.make(options)
+        (world, messenger, transport) = Self.make(options)
         #endif
+        rangeLog = RangeLog(transport: transport, demo: options.demoScenario != nil)
         demoWorld = world
         self.messenger = messenger
         let isDemo = options.demoScenario != nil
@@ -98,11 +113,12 @@ final class AppEnvironment {
         if messenger.profile.hasCompletedOnboarding { messenger.start() }
     }
 
-    private static func make(_ options: LaunchOptions) -> (DemoWorld?, Messenger) {
+    private static func make(_ options: LaunchOptions) -> (DemoWorld?, Messenger, Transport?) {
         if let scenario = options.demoScenario {
-            let world = DemoWorld(scenario: scenario)
-            return (world, world.messenger)
+            let world = DemoWorld(scenario: scenario, relay: options.demoRelay)
+            return (world, world.messenger, nil)
         }
-        return (nil, options.isEphemeral ? .ephemeral() : .live())
+        let transport = Radio.standard.makeTransport()
+        return (nil, options.isEphemeral ? .ephemeral(transport: transport) : .live(transport: transport), transport)
     }
 }

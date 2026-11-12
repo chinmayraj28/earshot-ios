@@ -18,6 +18,7 @@ struct EarshotApp: App {
             RootView(options: environment.options, demoWorld: environment.demoWorld, router: environment.router)
                 .environment(environment.messenger)
                 .environment(environment.notifications)
+                .environment(environment.rangeLog)
         }
     }
 

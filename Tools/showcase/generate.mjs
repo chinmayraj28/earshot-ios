@@ -47,6 +47,8 @@ const CONFIG = {
     { name: "onboarding", caption: "Welcome", src: "onboarding-welcome.png" },
     { name: "settings", caption: "Settings", src: "settings.png" },
     { name: "web-chat", caption: "Web version", src: "web/chat-narrow-light.png", kind: "web", theme: "light" },
+    { name: "photos", caption: "Photos & formatting", src: "chat-formatting-and-photo.png" },
+    { name: "relay", caption: "Travels through friends", src: "relay-delivered.png" },
   ],
   social: {
     title: "Earshot",

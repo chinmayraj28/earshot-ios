@@ -78,6 +78,7 @@ struct RootView: View {
         case .howItWorks: HowItWorksView()
         case .privacy: PrivacyView()
         case .blocked: BlockedContactsView()
+        case .rangeTest: RangeTestView()
         }
     }
 
@@ -109,11 +110,20 @@ struct RootView: View {
         }
         let parts = screen.split(separator: ":", maxSplits: 1).map(String.init)
         switch (parts.first, parts.count > 1 ? parts[1] : nil) {
-        case ("settings", _): router.path = [.settings]
+        case ("settings", let section?):
+            router.settingsScrollTarget = section
+            router.path = [.settings]
+        case ("settings", nil): router.path = [.settings]
         case ("howItWorks", _): router.path = [.settings, .howItWorks]
+        case ("rangeTest", _): router.path = [.settings, .rangeTest]
         case ("privacy", _): router.path = [.settings, .privacy]
         case ("chat", let name?): if let id = contactID(named: name) { router.path = [.chat(id)] }
         case ("contact", let name?): if let id = contactID(named: name) { router.path = [.chat(id), .contact(id)] }
+        case ("contactRelay", let name?):
+            if let id = contactID(named: name) {
+                router.contactScrollTarget = "relay"
+                router.path = [.chat(id), .contact(id)]
+            }
         default: break
         }
     }

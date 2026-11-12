@@ -144,11 +144,24 @@ struct DeliveryStatusLine: View {
     var isPhoto = false
     var progress: Double? = nil
     var failure: PhotoFailure? = nil
+    /// Set while a Waiting text is sealed for friends to carry: how many friends' phones took a copy.
+    var relayHandoffs: Int? = nil
+    /// Delivered was confirmed by a receipt that came back through friends.
+    var relayed = false
     let onRetry: () -> Void
 
     var body: some View {
         Group {
             switch status {
+            case .waiting where relayHandoffs != nil:
+                let handoffs = relayHandoffs ?? 0
+                Label(RelayText.sealed(handoffs: handoffs), systemImage: "envelope")
+                    .foregroundStyle(Palette.inkSecondary)
+                    .accessibilityLabel(RelayText.sealedSpoken(handoffs: handoffs, name: contactName.firstName))
+            case .delivered where relayed:
+                Label(RelayText.deliveredViaFriends, systemImage: "person.2")
+                    .foregroundStyle(Palette.inkSecondary)
+                    .accessibilityLabel("Delivered. The receipt came back through friends' phones.")
             case .waiting:
                 Label("Waiting for \(contactName.firstName) to be nearby", systemImage: "clock")
                     .foregroundStyle(Palette.inkSecondary)
