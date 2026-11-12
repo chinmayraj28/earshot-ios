@@ -112,7 +112,7 @@ export class DemoEngine extends EngineState {
       ["in", "I'm at the food trucks near the main stage.", 26 * 60],
       ["out", "Which truck are you at?", 25 * 60, "waiting"],
     ]);
-    this.#addSeeded(12, "Priya Raman", "connected", { unread: 2 }, now, [
+    this.#addSeeded(12, "Elena Costa", "connected", { unread: 2 }, now, [
       ["in", "Are you still in the building?", 8],
       ["in", "Doors on the east side are open now.", 6],
     ]);

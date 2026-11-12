@@ -71,7 +71,7 @@ public final class DemoWorld {
         guard scenario != .empty else { return }
         let meContact = Contact(id: me.contactID, displayName: "Chinmay", identityKey: me.publicKey)
         addBot("Maya Okafor", identity: maya, knows: scenario == .populated ? [meContact] : [], accepts: true)
-        addBot("Priya Raman", identity: Identity(), knows: [], accepts: true)
+        addBot("Elena Costa", identity: Identity(), knows: [], accepts: true)
         addBot("Tomás", identity: Identity(), knows: [], accepts: false)
         // Jonas is a saved contact who is not around, so he gets no bot.
     }

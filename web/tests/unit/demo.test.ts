@@ -19,7 +19,7 @@ describe("demo engine", () => {
     const populated = createDemoEngine("populated").getSnapshot();
     expect(populated.availability).toBe("ready");
     expect(populated.conversations.map((c) => [c.contact.displayName, c.link, c.unreadCount])).toEqual([
-      ["Priya Raman", "connected", 2],
+      ["Elena Costa", "connected", 2],
       ["Maya Okafor", "connected", 0],
       ["Jonas Weber", "outOfRange", 0],
       ["Sam Lee", "outOfRange", 0],

@@ -32,7 +32,7 @@ final class EarshotUITests: XCTestCase {
         turnOn.tap()
 
         XCTAssertTrue(app.buttons["home.settings"].waitForExistence(timeout: 10), "Home should appear")
-        XCTAssertTrue(element(app, "nearby.peer.Priya Raman").waitForExistence(timeout: 20),
+        XCTAssertTrue(element(app, "nearby.peer.Elena Costa").waitForExistence(timeout: 20),
                       "People nearby should be listed once Earshot is on")
     }
 
@@ -40,23 +40,23 @@ final class EarshotUITests: XCTestCase {
     func testConnectToNewPersonThenChatAndGetReply() {
         let app = launch("-demo", "populated")
 
-        tap(app.buttons["nearby.connect.Priya Raman"], timeout: 20)
+        tap(app.buttons["nearby.connect.Elena Costa"], timeout: 20)
 
         let composer = element(app, "chat.composer")
         XCTAssertTrue(composer.waitForExistence(timeout: 25), "Accepted request should open the chat")
-        XCTAssertTrue(element(app, "chat.title").label.contains("Priya Raman"))
+        XCTAssertTrue(element(app, "chat.title").label.contains("Elena Costa"))
         XCTAssertFalse(element(app, "notifications.offer").exists,
                        "Demo mode must not show the notification explainer without -demoNotificationPrompt")
 
         composer.tap()
-        composer.typeText("Hi Priya, I'm by the stairs")
+        composer.typeText("Hi Elena, I'm by the stairs")
         tap(app.buttons["chat.send"])
 
-        XCTAssertTrue(element(app, "Hi Priya, I'm by the stairs", labelContains: true).waitForExistence(timeout: 5),
+        XCTAssertTrue(element(app, "Hi Elena, I'm by the stairs", labelContains: true).waitForExistence(timeout: 5),
                       "Sent bubble should appear")
         waitForLabel(element(app, "chat.lastStatus"), toContain: "Delivered", timeout: 20)
         let reply = element(app, "Got it", labelContains: true)
-        XCTAssertTrue(reply.waitForExistence(timeout: 20), "Priya's reply should arrive")
+        XCTAssertTrue(reply.waitForExistence(timeout: 20), "Elena's reply should arrive")
         let visible = XCTWaiter().wait(for: [expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: reply)],
                                        timeout: 5)
         XCTAssertEqual(visible, .completed, "The transcript should follow the new reply into view")
@@ -143,7 +143,7 @@ final class EarshotUITests: XCTestCase {
     func testNotificationExplainerAppearsAfterFirstContactAndCanBeDismissed() {
         let app = launch("-demo", "populated", "-demoNotificationPrompt")
 
-        tap(app.buttons["nearby.connect.Priya Raman"], timeout: 20)
+        tap(app.buttons["nearby.connect.Elena Costa"], timeout: 20)
         XCTAssertTrue(element(app, "chat.composer").waitForExistence(timeout: 25))
 
         let card = element(app, "notifications.offer")

@@ -16,16 +16,16 @@ final class ScreenshotTests: XCTestCase {
         let tomas = app.buttons["nearby.connect.Tomás"]
         XCTAssertTrue(tomas.waitForExistence(timeout: 20))
         tomas.tap()
-        let priya = app.buttons["nearby.connect.Priya Raman"]
-        XCTAssertTrue(priya.waitForExistence(timeout: 5))
-        priya.tap()
+        let elena = app.buttons["nearby.connect.Elena Costa"]
+        XCTAssertTrue(elena.waitForExistence(timeout: 5))
+        elena.tap()
         XCTAssertTrue(app.buttons["nearby.cancel.Tomás"].waitForExistence(timeout: 5))
         attach(app, "nearby-waiting")
 
         let composer = app.descendants(matching: .any).matching(identifier: "chat.composer").firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
-        composer.typeText("Hi Priya! Which exit are you nearest?")
+        composer.typeText("Hi Elena! Which exit are you nearest?")
         app.buttons["chat.send"].tap()
         let reply = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Got it")).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 20))
@@ -81,9 +81,9 @@ final class ScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "populated", "-demoNotificationPrompt"]
         app.launch()
-        let priya = app.buttons["nearby.connect.Priya Raman"]
-        XCTAssertTrue(priya.waitForExistence(timeout: 20))
-        priya.tap()
+        let elena = app.buttons["nearby.connect.Elena Costa"]
+        XCTAssertTrue(elena.waitForExistence(timeout: 20))
+        elena.tap()
         XCTAssertTrue(app.buttons["notifications.offer.notNow"].waitForExistence(timeout: 25))
         sleep(1)
         attach(app, "notifications-offer")

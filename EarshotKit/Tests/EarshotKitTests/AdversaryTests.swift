@@ -482,7 +482,7 @@ final class RawPeer {
         let jonas = try #require(me.contacts.first { $0.displayName == "Jonas Weber" })
         await waitUntil("Maya connects") { me.linkState(for: maya.id) == .connected }
         #expect(me.linkState(for: jonas.id) == .outOfRange)
-        #expect(me.nearbyPeers.filter { $0.contactID == nil }.map(\.displayName).sorted() == ["Priya Raman", "Tomás"])
+        #expect(me.nearbyPeers.filter { $0.contactID == nil }.map(\.displayName).sorted() == ["Elena Costa", "Tomás"])
 
         me.send("Are you there?", to: maya.id)
         #expect(me.messages(for: maya.id).last?.status == .delivered)
