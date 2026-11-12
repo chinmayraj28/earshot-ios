@@ -9,6 +9,7 @@
 // To change which screenshot appears where, edit CONFIG below. Nothing else should need
 // to change when new screens are added.
 
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -365,12 +366,12 @@ function socialPage() {
 // ────────────────────────────────────────────────────────────────────────────────────
 const JOBS = {
   hero: () => [
-    { file: "hero.png", html: heroPage("dark"), w: 1200, h: 675, scale: 2 },
-    { file: "hero-light.png", html: heroPage("light"), w: 1200, h: 675, scale: 2 },
+    { file: "hero.png", html: heroPage("dark"), w: 1200, h: 675, scale: 4, supersample: 2 },
+    { file: "hero-light.png", html: heroPage("light"), w: 1200, h: 675, scale: 4, supersample: 2 },
   ],
-  web: () => [{ file: "web.png", html: webPage(), w: 1200, h: 750, scale: 2 }],
-  tiles: () => CONFIG.tiles.map((t) => ({ file: `tile-${t.name}.png`, html: tilePage(t), w: 420, h: 520, scale: 1.5 })),
-  social: () => [{ file: "social-preview.png", html: socialPage(), w: 1280, h: 640, scale: 1, opaque: true }],
+  web: () => [{ file: "web.png", html: webPage(), w: 1200, h: 750, scale: 4 }],
+  tiles: () => CONFIG.tiles.map((t) => ({ file: `tile-${t.name}.png`, html: tilePage(t), w: 420, h: 520, scale: 3 })),
+  social: () => [{ file: "social-preview.png", html: socialPage(), w: 1280, h: 640, scale: 2, supersample: 2, opaque: true }],
 };
 
 async function main() {
@@ -386,13 +387,18 @@ async function main() {
   try {
     for (const name of names) {
       for (const job of JOBS[name]()) {
-        const context = await browser.newContext({ viewport: { width: job.w, height: job.h }, deviceScaleFactor: job.scale });
+        const context = await browser.newContext({ viewport: { width: job.w, height: job.h }, deviceScaleFactor: job.scale * (job.supersample || 1) });
         const pg = await context.newPage();
         await pg.setContent(job.html, { waitUntil: "load" });
         await pg.evaluate(() => document.fonts.ready);
         const out = join(OUT, job.file);
         const card = pg.locator(".card");
         await card.screenshot({ path: out, omitBackground: !job.opaque });
+        // Tilted phones come out slightly soft when drawn at their final size. Drawing them
+        // larger and shrinking the picture afterwards (macOS `sips`) gives sharper text.
+        if (job.supersample && process.platform === "darwin") {
+          execFileSync("sips", ["--resampleWidth", String(job.w * job.scale), out], { stdio: "ignore" });
+        }
         await context.close();
         console.log(`${job.file.padEnd(24)} ${(statSync(out).size / 1024).toFixed(0).padStart(5)} KB`);
       }

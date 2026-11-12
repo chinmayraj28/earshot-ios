@@ -22,7 +22,7 @@ async function capture(page: Page, name: string) {
 for (const scheme of ["light", "dark"] as const) {
   for (const [size, viewport] of Object.entries(sizes)) {
     test.describe(`${size} ${scheme}`, () => {
-      test.use({ colorScheme: scheme, viewport });
+      test.use({ colorScheme: scheme, viewport, deviceScaleFactor: 3 });
       const tag = `${size}-${scheme}`;
 
       test("onboarding", async ({ page }) => {
