@@ -27,6 +27,10 @@ also a [web version](#web-version) for Chrome and Edge on computers and Android 
 - **Conversations with honest delivery states:** Waiting (not in range, will send by
   itself), Sending, Delivered (the other phone confirmed it stored the message), Not delivered.
 - **Reconnects by itself** when a saved contact comes back into range, and re-sends what was waiting.
+- **Travels through friends (new, experimental):** when you and a contact are out of range,
+  a text is sealed so only they can open it and carried by your mutual contacts' phones for up
+  to 48 hours. Text only, contacts only, never strangers; can be switched off. Passes its
+  automated tests but has **not yet been verified on real phones**.
 - **Photos**, one at a time, while you are connected: shrunk to about 150 KB with location
   and camera details removed, sent in small encrypted pieces with a progress ring, and
   "Delivered" only once the other phone has received, checked and saved the whole photo.
@@ -53,6 +57,10 @@ also a [web version](#web-version) for Chrome and Edge on computers and Android 
   <img src="docs/showcase/tile-onboarding.png" width="30%" alt="The welcome screen: Reach people nearby when the network is gone">
   <img src="docs/showcase/tile-settings.png" width="30%" alt="Settings: your name, visibility to people nearby, and notification options">
   <img src="docs/showcase/tile-web-chat.png" width="30%" alt="The web version showing a conversation in a phone's browser">
+</p>
+<p align="center">
+  <img src="docs/showcase/tile-relay.png" width="30%" alt="A message sealed and waiting with two friends' phones while the contact is out of range">
+  <img src="docs/showcase/tile-photos.png" width="30%" alt="A conversation with formatted text and a photo">
 </p>
 
 Photos and formatting:
@@ -203,7 +211,7 @@ Which screenshot goes where is set in the `CONFIG` object at the top of
 
 Verified on this project's development machine:
 
-- Engine unit and integration tests pass (152), including hostile-peer tests for
+- Engine unit and integration tests pass (248), including hostile-peer tests for
   photos, old↔new compatibility in both roles and over reconnection, metadata removal, and a
   migration test that loads data saved by the previous version.
 - The app builds for the Simulator and for a real iPhone (arm64, unsigned) with no warnings.
@@ -242,6 +250,14 @@ Verified on real hardware (12 November 2026, iPhone 17 Pro and iPhone 15, plus a
   hand; transfer time and speed not yet measured).
 
 **Not yet verified — still needs checking on real phones:**
+
+- **Relaying through friends' phones.** Every relay test so far uses an in-memory radio with
+  three simulated phones (delivery, receipts, hostile carriers, floods, expiry). Nothing has
+  been run over real Bluetooth with three devices. The relay protocol has had one internal
+  adversarial review and no independent security audit.
+- **Automatic reconnect after a long absence.** A pending connect may not survive the other
+  iPhone changing its Bluetooth address (about every 15 minutes); the fallback is scanning.
+  Range and reconnect times have not been measured.
 
 1. Walk apart until the link drops, walk back, and confirm waiting messages are delivered.
 2. Send to a phone whose Earshot was sent to the home screen a minute or more earlier and
