@@ -32,7 +32,7 @@ final class EarshotUITests: XCTestCase {
         turnOn.tap()
 
         XCTAssertTrue(app.buttons["home.settings"].waitForExistence(timeout: 10), "Home should appear")
-        XCTAssertTrue(element(app, "nearby.peer.Elena Costa").waitForExistence(timeout: 20),
+        XCTAssertTrue(element(app, "nearby.peer.Aubrey Graham").waitForExistence(timeout: 20),
                       "People nearby should be listed once Earshot is on")
     }
 
@@ -40,23 +40,23 @@ final class EarshotUITests: XCTestCase {
     func testConnectToNewPersonThenChatAndGetReply() {
         let app = launch("-demo", "populated")
 
-        tap(app.buttons["nearby.connect.Elena Costa"], timeout: 20)
+        tap(app.buttons["nearby.connect.Aubrey Graham"], timeout: 20)
 
         let composer = element(app, "chat.composer")
         XCTAssertTrue(composer.waitForExistence(timeout: 25), "Accepted request should open the chat")
-        XCTAssertTrue(element(app, "chat.title").label.contains("Elena Costa"))
+        XCTAssertTrue(element(app, "chat.title").label.contains("Aubrey Graham"))
         XCTAssertFalse(element(app, "notifications.offer").exists,
                        "Demo mode must not show the notification explainer without -demoNotificationPrompt")
 
         composer.tap()
-        composer.typeText("Hi Elena, I'm by the stairs")
+        composer.typeText("Hi Aubrey, I'm by the stairs")
         tap(app.buttons["chat.send"])
 
-        XCTAssertTrue(element(app, "Hi Elena, I'm by the stairs", labelContains: true).waitForExistence(timeout: 5),
+        XCTAssertTrue(element(app, "Hi Aubrey, I'm by the stairs", labelContains: true).waitForExistence(timeout: 5),
                       "Sent bubble should appear")
         waitForLabel(element(app, "chat.lastStatus"), toContain: "Delivered", timeout: 20)
         let reply = element(app, "Got it", labelContains: true)
-        XCTAssertTrue(reply.waitForExistence(timeout: 20), "Elena's reply should arrive")
+        XCTAssertTrue(reply.waitForExistence(timeout: 20), "Aubrey's reply should arrive")
         let visible = XCTWaiter().wait(for: [expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: reply)],
                                        timeout: 5)
         XCTAssertEqual(visible, .completed, "The transcript should follow the new reply into view")
@@ -104,7 +104,7 @@ final class EarshotUITests: XCTestCase {
     func testMessageToOutOfRangeContactWaits() {
         let app = launch("-demo", "populated")
 
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
         let composer = element(app, "chat.composer")
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         XCTAssertTrue(element(app, "chat.banner").waitForExistence(timeout: 10),
@@ -117,37 +117,37 @@ final class EarshotUITests: XCTestCase {
         XCTAssertTrue(element(app, "Meet at the gate?", labelContains: true).waitForExistence(timeout: 5))
         let status = element(app, "chat.lastStatus")
         waitForLabel(status, toContain: "Waiting", timeout: 10)
-        XCTAssertTrue(status.label.contains("Jonas"), "Got: \(status.label)")
+        XCTAssertTrue(status.label.contains("Alice"), "Got: \(status.label)")
     }
 
     @MainActor
     func testContactWalkingAwayExplainsThatMessagesWillWait() {
-        // Debug-only argument: Maya walks out of range about 6 s after launch.
-        let app = launch("-demo", "populated", "-demoLeave", "Maya Okafor")
+        // Debug-only argument: Jensen walks out of range about 6 s after launch.
+        let app = launch("-demo", "populated", "-demoLeave", "Jensen Huang")
 
-        tap(app.buttons["conversation.Maya Okafor"], timeout: 20)
+        tap(app.buttons["conversation.Jensen Huang"], timeout: 20)
         let title = element(app, "chat.title")
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         let banner = element(app, "chat.banner")
-        XCTAssertTrue(banner.waitForExistence(timeout: 20), "A banner should appear when Maya leaves")
+        XCTAssertTrue(banner.waitForExistence(timeout: 20), "A banner should appear when Jensen leaves")
         XCTAssertTrue(banner.label.contains("moved out of range"), "Got: \(banner.label)")
 
         let composer = element(app, "chat.composer")
         composer.tap()
         composer.typeText("Back at the stairs")
         tap(app.buttons["chat.send"])
-        // Maya's demo phone shares relay keys with ours, so the message may be sealed for friends
-        // to carry; either way it is Waiting for Maya and not delivered.
+        // Jensen's demo phone shares relay keys with ours, so the message may be sealed for friends
+        // to carry; either way it is Waiting for Jensen and not delivered.
         let status = element(app, "chat.lastStatus")
         waitForLabel(status, toContain: "Waiting", timeout: 10)
-        XCTAssertTrue(status.label.contains("Maya"), "Got: \(status.label)")
+        XCTAssertTrue(status.label.contains("Jensen"), "Got: \(status.label)")
     }
 
     @MainActor
     func testNotificationExplainerAppearsAfterFirstContactAndCanBeDismissed() {
         let app = launch("-demo", "populated", "-demoNotificationPrompt")
 
-        tap(app.buttons["nearby.connect.Elena Costa"], timeout: 20)
+        tap(app.buttons["nearby.connect.Aubrey Graham"], timeout: 20)
         XCTAssertTrue(element(app, "chat.composer").waitForExistence(timeout: 25))
 
         let card = element(app, "notifications.offer")
@@ -178,26 +178,26 @@ final class EarshotUITests: XCTestCase {
         try XCTSkipUnless(allowed, "Notifications aren't allowed for Earshot in this Simulator")
         app.navigationBars.buttons.firstMatch.tap()
 
-        tap(app.buttons["conversation.Maya Okafor"], timeout: 10)
+        tap(app.buttons["conversation.Jensen Huang"], timeout: 10)
         let composer = element(app, "chat.composer")
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         composer.tap()
         composer.typeText("Where are you?")
         tap(app.buttons["chat.send"])
-        // Leave the conversation before Maya's reply arrives (~2 s).
+        // Leave the conversation before Jensen's reply arrives (~2 s).
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(app.buttons["home.settings"].waitForExistence(timeout: 5))
 
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let banner = springboard.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "Maya Okafor")).firstMatch
+            .matching(NSPredicate(format: "label CONTAINS %@", "Jensen Huang")).firstMatch
         XCTAssertTrue(banner.waitForExistence(timeout: 20), "A banner should announce the reply")
         XCTAssertTrue(banner.label.contains("New message"), "Message text is hidden by default. Got: \(banner.label)")
         banner.tap()
 
         let title = element(app, "chat.title")
         XCTAssertTrue(title.waitForExistence(timeout: 10))
-        XCTAssertTrue(title.label.contains("Maya Okafor"), "Tapping should open the conversation. Got: \(title.label)")
+        XCTAssertTrue(title.label.contains("Jensen Huang"), "Tapping should open the conversation. Got: \(title.label)")
     }
 
     @MainActor

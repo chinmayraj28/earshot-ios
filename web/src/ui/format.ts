@@ -5,7 +5,7 @@ import { Limits, type LinkState, type Message, type RequestFailure } from "../en
  * Cleans a display name exactly like the phone does (Limits.sanitizedName in EarshotKit):
  * drops control characters and line breaks, trims, turns runs of spaces into one space,
  * keeps at most 32 characters and at most 96 bytes.
- * Example: "  Maya   Okafor \n" becomes "Maya Okafor".
+ * Example: "  Jensen   Huang \n" becomes "Jensen Huang".
  */
 export function sanitizeName(raw: string): string {
   // Swift's CharacterSet.controlCharacters is Unicode categories Cc and Cf; newlines adds Zl and Zp.
@@ -26,14 +26,14 @@ export function graphemes(text: string): string[] {
   return Array.from(text);
 }
 
-/** "Maya Okafor" -> "MO", "tomás" -> "T". Same rule as the phone's Avatar. */
+/** "Jensen Huang" -> "MO", "tomás" -> "T". Same rule as the phone's Avatar. */
 export function initials(name: string): string {
   const words = name.split(/\s+/).filter(Boolean).slice(0, 2);
   const letters = words.map((word) => (graphemes(word)[0] ?? "").toLocaleUpperCase()).join("");
   return letters || "?";
 }
 
-/** "Maya Okafor" -> "Maya". Keeps status lines short and personal. */
+/** "Jensen Huang" -> "Jensen". Keeps status lines short and personal. */
 export function firstName(name: string): string {
   return name.split(/\s+/).filter(Boolean)[0] ?? name;
 }

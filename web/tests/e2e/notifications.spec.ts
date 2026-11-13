@@ -46,11 +46,11 @@ test("a message for a chat that isn't open shows a private notification", async 
   await page.evaluate(() => {
     (window.Notification as unknown as { permission: string }).permission = "granted";
   });
-  // A new demo contact connects and sends a greeting about 1.5 s later; by then we are in Maya's chat.
+  // A new demo contact connects and sends a greeting about 1.5 s later; by then we are in Jensen's chat.
   await page.getByRole("button", { name: "Find a nearby phone" }).click();
   await expect(page.locator(".chat__name")).toBeVisible({ timeout: 10_000 });
   const newName = (await page.locator(".chat__name").textContent())?.trim() ?? "";
-  await page.locator(".sidebar .row", { hasText: "Maya Okafor" }).click();
+  await page.locator(".sidebar .row", { hasText: "Jensen Huang" }).click();
   await expect.poll(async () => (await record(page)).shown.length, { timeout: 10_000 }).toBeGreaterThan(0);
   const shown = (await record(page)).shown[0];
   expect(shown?.title).toBe(newName);

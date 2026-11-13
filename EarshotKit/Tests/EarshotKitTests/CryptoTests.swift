@@ -154,7 +154,7 @@ import Testing
     }
 
     @Test func namesAreCleaned() {
-        #expect(Limits.sanitizedName("  Maya \n Okafor\t ") == "Maya Okafor")
+        #expect(Limits.sanitizedName("  Jensen \n Huang\t ") == "Jensen Huang")
         #expect(Limits.sanitizedName(String(repeating: "x", count: 100)).count == Limits.maxNameLength)
         #expect(Limits.sanitizedName(" \n ").isEmpty)
     }

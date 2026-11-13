@@ -35,12 +35,12 @@ for (const scheme of ["light", "dark"] as const) {
       test("home and chat", async ({ page }) => {
         await openDemo(page, "populated");
         await capture(page, `home-${tag}`);
-        await row(page, "Maya Okafor").click();
+        await row(page, "Jensen Huang").click();
         await expect(page.locator(".chat__name")).toBeVisible();
         await page.locator(".composer__input").blur();
         await capture(page, `chat-${tag}`);
         await page.getByRole("button", { name: size === "narrow" ? "Back to conversations" : "Settings" }).click();
-        await row(page, "Jonas Weber").click();
+        await row(page, "Alice Huang").click();
         await page.locator(".composer__input").blur();
         await capture(page, `chat-out-of-range-${tag}`);
       });
@@ -59,7 +59,7 @@ for (const scheme of ["light", "dark"] as const) {
 
       test("contact details and settings", async ({ page }) => {
         await openDemo(page, "populated");
-        await row(page, "Maya Okafor").click();
+        await row(page, "Jensen Huang").click();
         await page.getByRole("button", { name: "Contact details", exact: true }).click();
         await capture(page, `contact-details-${tag}`);
         await page.getByRole("button", { name: "Remove contact" }).click();

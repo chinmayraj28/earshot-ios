@@ -8,7 +8,7 @@ import Foundation
 /// - `-demoNotificationPrompt`: with `-demo`, the notification explainer is shown after the first
 ///   new contact connects (demo mode otherwise skips it so it can't get in the way of UI tests).
 /// - `-demoRelay <sealed,delivered,carrying>`: with `-demo populated`, puts relaying into demo
-///   states: Jonas's waiting message sealed with friends (`-demoRelayHandoffs N`, default 2), his
+///   states: Alice's waiting message sealed with friends (`-demoRelayHandoffs N`, default 2), his
 ///   last message delivered through friends with a reply that came the same way, and this phone
 ///   carrying sealed messages for friends. Any combination, comma-separated.
 /// - `-ephemeral`: real radios, nothing saved.

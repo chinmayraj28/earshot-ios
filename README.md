@@ -51,7 +51,7 @@ also a [web version](#web-version) for Chrome and Edge on computers and Android 
 <p align="center">
   <img src="docs/showcase/tile-nearby.png" width="30%" alt="Nearby: waiting for two people to accept a request, with Cancel buttons">
   <img src="docs/showcase/tile-contact.png" width="30%" alt="A contact's page with a nine-digit safety code, marked Verified">
-  <img src="docs/showcase/tile-notification.png" width="30%" alt="A notification banner for a new message from Maya Okafor">
+  <img src="docs/showcase/tile-notification.png" width="30%" alt="A notification banner for a new message from Jensen Huang">
 </p>
 <p align="center">
   <img src="docs/showcase/tile-onboarding.png" width="30%" alt="The welcome screen: Reach people nearby when the network is gone">

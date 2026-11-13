@@ -20,10 +20,10 @@ final class AccessibilityAuditTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "populated"]
         app.launch()
-        XCTAssertTrue(app.buttons["nearby.connect.Elena Costa"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["nearby.connect.Aubrey Graham"].waitForExistence(timeout: 20))
         try audit(app, "Home")
 
-        app.buttons["conversation.Maya Okafor"].tap()
+        app.buttons["conversation.Jensen Huang"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat.composer").firstMatch.waitForExistence(timeout: 10))
         try audit(app, "Chat")
 

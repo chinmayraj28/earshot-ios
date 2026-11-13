@@ -565,6 +565,8 @@ final class ActivityLog {
         _ = t.a.messenger.send("second", to: t.aSeesB)
         await waitUntil("Chidi carries both") { t.c.messenger.carriedMailCount == 2 }
         let envelopes = t.c.messenger.relay.carried.map(\.envelope.bytes)
+        // Stop here if the wait above failed: indexing an empty list would crash the whole test run.
+        try #require(envelopes.count == 2)
         let secrets: [Data] = [t.a.messenger.identityKey, t.b.messenger.identityKey,
                                Data(t.aSeesB.rawValue.utf8), Data(t.bSeesA.rawValue.utf8),
                                Data("Asha".utf8), Data("Ben".utf8),
@@ -647,7 +649,9 @@ final class ActivityLog {
         _ = again.send("two", to: ids.aSeesB)
         #expect(again.relay.keys.outbox.count == 2)
         #expect(again.relay.keys.outbox.map(\.index) == [0, 1], "the chain index is never reused after a restart")
-        #expect(again.relay.keys.outbox[1].envelope[1..<17] != firstTag)
+        let outbox = again.relay.keys.outbox
+        try #require(outbox.count == 2)
+        #expect(outbox[1].envelope[1..<17] != firstTag)
 
         again.setCarryMode(.off)
         let third = Messenger(transport: hub.makeTransport(token: "asha-3"), persistence: store, identityStore: keys,

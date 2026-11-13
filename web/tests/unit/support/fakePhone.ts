@@ -96,7 +96,7 @@ export class FakePhone implements FakePeripheral {
 
   constructor(token: string, options: FakePhoneOptions = {}) {
     this.identity = options.seed ? identityFromSeed(options.seed) : newIdentity();
-    this.name = options.name ?? "Maya Okafor";
+    this.name = options.name ?? "Jensen Huang";
     this.options = { autoAccept: options.autoAccept ?? true, ack: options.ack ?? true, echo: options.echo ?? false, notifyChunk: options.notifyChunk ?? 20 };
     this.device = new MemoryDevice(token, this);
   }

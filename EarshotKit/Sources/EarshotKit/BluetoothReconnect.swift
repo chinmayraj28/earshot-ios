@@ -31,7 +31,7 @@ import Foundation
 /// Nothing here is written to disk. The identifiers are random per app install and
 /// say nothing about who the person is.
 ///
-/// Example: Maya and Tom are linked for an hour. Tom walks 200 m away, the connection
+/// Example: Jensen and Tom are linked for an hour. Tom walks 200 m away, the connection
 /// drops with `.linkLost`, and the decision is `.connect(after: 0)`: a request is left
 /// waiting. Ten minutes later Tom walks back, iOS completes it, and the engine re-handshakes.
 struct ReconnectPolicy {

@@ -7,7 +7,7 @@ test("narrow screens: list, then chat, then back (button and browser Back)", asy
   await expect(page.locator(".sidebar")).toBeVisible();
   await expect(page.locator(".main")).toBeHidden();
 
-  await row(page, "Maya Okafor").click();
+  await row(page, "Jensen Huang").click();
   await expect(page.locator(".sidebar")).toBeHidden();
   await expect(composer(page)).toBeVisible();
 
@@ -16,7 +16,7 @@ test("narrow screens: list, then chat, then back (button and browser Back)", asy
   await expect(page.locator(".main")).toBeHidden();
 
   // Android's back gesture is the browser's Back.
-  await row(page, "Jonas Weber").click();
+  await row(page, "Alice Huang").click();
   await page.getByRole("button", { name: "Contact details", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Contact" })).toBeVisible();
   await page.goBack();
@@ -29,7 +29,7 @@ test("narrow screens: list, then chat, then back (button and browser Back)", asy
 
 test("narrow screens: request progress shows while a chat is open", async ({ page }) => {
   await openDemo(page, "populated", "declined");
-  await row(page, "Jonas Weber").click();
+  await row(page, "Alice Huang").click();
   await page.getByRole("button", { name: "Reconnect" }).click();
   await expect(page.locator(".floating-tray .request")).toContainText(/No answer/, { timeout: 10_000 });
 });
@@ -39,7 +39,7 @@ test("320 px wide: nothing scrolls sideways", async ({ page }) => {
   await openDemo(page, "populated");
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(await overflow()).toBeLessThanOrEqual(0);
-  await row(page, "Maya Okafor").click();
+  await row(page, "Jensen Huang").click();
   expect(await overflow()).toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: "Contact details", exact: true }).click();
   expect(await overflow()).toBeLessThanOrEqual(0);
@@ -47,7 +47,7 @@ test("320 px wide: nothing scrolls sideways", async ({ page }) => {
 
 test("touch targets are at least 44 px", async ({ page }) => {
   await openDemo(page, "populated");
-  await row(page, "Maya Okafor").click();
+  await row(page, "Jensen Huang").click();
   const sizes = await page.locator("button:visible").evaluateAll((buttons) =>
     buttons.map((button) => {
       const box = button.getBoundingClientRect();

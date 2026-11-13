@@ -16,7 +16,7 @@ final class ScreenshotTests: XCTestCase {
         let tomas = app.buttons["nearby.connect.Tomás"]
         XCTAssertTrue(tomas.waitForExistence(timeout: 20))
         tomas.tap()
-        let elena = app.buttons["nearby.connect.Elena Costa"]
+        let elena = app.buttons["nearby.connect.Aubrey Graham"]
         XCTAssertTrue(elena.waitForExistence(timeout: 5))
         elena.tap()
         XCTAssertTrue(app.buttons["nearby.cancel.Tomás"].waitForExistence(timeout: 5))
@@ -25,7 +25,7 @@ final class ScreenshotTests: XCTestCase {
         let composer = app.descendants(matching: .any).matching(identifier: "chat.composer").firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 20))
         composer.tap()
-        composer.typeText("Hi Elena! Which exit are you nearest?")
+        composer.typeText("Hi Aubrey! Which exit are you nearest?")
         app.buttons["chat.send"].tap()
         let reply = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Got it")).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 20))
@@ -81,7 +81,7 @@ final class ScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "populated", "-demoNotificationPrompt"]
         app.launch()
-        let elena = app.buttons["nearby.connect.Elena Costa"]
+        let elena = app.buttons["nearby.connect.Aubrey Graham"]
         XCTAssertTrue(elena.waitForExistence(timeout: 20))
         elena.tap()
         XCTAssertTrue(app.buttons["notifications.offer.notNow"].waitForExistence(timeout: 25))
@@ -97,7 +97,7 @@ final class ScreenshotTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "populated"]
         app.launch()
-        let maya = app.buttons["conversation.Maya Okafor"]
+        let maya = app.buttons["conversation.Jensen Huang"]
         XCTAssertTrue(maya.waitForExistence(timeout: 20))
         maya.tap()
         let composer = app.descendants(matching: .any).matching(identifier: "chat.composer").firstMatch
@@ -108,7 +108,7 @@ final class ScreenshotTests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let banner = springboard.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "Maya Okafor")).firstMatch
+            .matching(NSPredicate(format: "label CONTAINS %@", "Jensen Huang")).firstMatch
         XCTAssertTrue(banner.waitForExistence(timeout: 20))
         sleep(1) // let the banner finish sliding in; otherwise the capture can be blurred
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

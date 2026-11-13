@@ -38,7 +38,7 @@ export function isWellFormed(text: string): boolean {
  * Cleans a name typed here or received from a phone, exactly like `Limits.sanitizedName`:
  * removes control and format characters and line breaks, squeezes runs of spaces, keeps at most
  * 32 characters and at most 96 bytes of UTF-8.
- * Example: "  Maya\n  Okafor​ " becomes "Maya Okafor".
+ * Example: "  Jensen\n  Huang​ " becomes "Jensen Huang".
  */
 export function sanitizedName(raw: string): string {
   const collapsed = wellFormed(raw)

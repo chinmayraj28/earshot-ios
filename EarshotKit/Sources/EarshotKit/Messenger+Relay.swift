@@ -162,11 +162,13 @@ extension Messenger {
 
     /// Seals every waiting text message to a contact who is not linked right now, has confirmed
     /// relay keys, and has no sealed copy yet. Called whenever that could have changed.
-    func relaySealWaiting() {
+    /// - Parameter only: look at one contact only (a message was just written to them).
+    func relaySealWaiting(only: ContactID? = nil) {
         guard carryMode != .off else { return }
         let now = configuration.now()
         var sealed: [Data] = []
-        for contact in contacts where !contact.isBlocked && relay.hasConfirmedGeneration(contact.id) {
+        for contact in contacts where (only == nil || contact.id == only) && !contact.isBlocked
+            && relay.hasConfirmedGeneration(contact.id) {
             guard !links.values.contains(where: { $0.contactID == contact.id }) else { continue }
             for message in messages(for: contact.id) where message.direction == .outgoing && message.status == .waiting
                 && message.photo == nil && !relay.hasOutboxEntry(for: message.id) {

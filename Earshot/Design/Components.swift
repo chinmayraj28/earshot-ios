@@ -149,7 +149,7 @@ struct LinkStatusLabel: View {
 // MARK: Text helpers
 
 extension String {
-    /// "Maya Okafor" -> "Maya". Used to keep status copy short and personal.
+    /// "Jensen Huang" -> "Jensen". Used to keep status copy short and personal.
     var firstName: String {
         split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? self
     }

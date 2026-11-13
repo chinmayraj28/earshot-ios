@@ -48,7 +48,7 @@ describe("first connection", () => {
     const result = await engine.findNearby();
     expect(result).toEqual({ kind: "started", peer: "phone-1", contactID: null });
     await settle();
-    expect(engine.getSnapshot().requests).toEqual([{ id: "phone-1", displayName: "Maya Okafor", state: { kind: "waiting" } }]);
+    expect(engine.getSnapshot().requests).toEqual([{ id: "phone-1", displayName: "Jensen Huang", state: { kind: "waiting" } }]);
     expect(phone.invites[0]?.name).toBe("Alex");
     expect(phone.invites[0]?.tag).toBeUndefined();
 
@@ -56,7 +56,7 @@ describe("first connection", () => {
     await waitFor("connected", () => engine.getSnapshot().requests[0]?.state.kind === "connected");
     const id = phone.contactID;
     expect(engine.getSnapshot().requests[0]?.state).toEqual({ kind: "connected", contactID: id });
-    expect(engine.getSnapshot().contacts.map((c) => c.displayName)).toEqual(["Maya Okafor"]);
+    expect(engine.getSnapshot().contacts.map((c) => c.displayName)).toEqual(["Jensen Huang"]);
     expect(linkOf(engine, id)).toBe("connected");
     expect(events).toContain("connected");
     expect(engine.safetyCode(id)).toBe(safetyCode(phone.identity.publicKey, engine.identityKey));

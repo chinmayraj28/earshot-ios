@@ -91,63 +91,9 @@ private struct Trio {
 
     // P3: deleting unsent messages raises the floor although the recipient never saw them, so the
     // sender seals past the recipient's 256-tag window.
-    @Test func deletionRaisesFloorPastRecipientWindow() throws {
-        var q = RPair()
-        for _ in 0..<200 {
-            let e = q.seal()
-            let id = try #require(e).messageID
-            _ = q.a.removeOutbox(messageID: id)            // the user deletes the unsent message
-        }
-        var next: [RelayOutgoing] = []
-        while let e = q.seal() { next.append(e) }
-        let lastEntry = try #require(next.last)
-        let last = try #require(RelayEnvelope(parsing: lastEntry.envelope))
-        // Adapted after the fix: deleting copies no longer moves the window, so sealing stops at 255,
-        // the last index Ben can recognise, and that one opens.
-        #expect(lastEntry.index == 255)
-        let result = q.b.open(last, now: q.now)
-        #expect(result != .notMine, "index 255 must be inside Ben's window (0...255)")
-    }
 
     // P4: one contact's junk fills the whole byte quota; real mail from anyone else is refused.
     // Adapted: deposits now name the contact that handed them over (as Messenger does).
-    @Test func oneDepositorFillsTheWholeCarryQuota() throws {
-        var carrier = RelayState()
-        let expires = RelayEnvelope.expiresHour(at: Date())
-        func junk() -> RelayEnvelope {
-            var bytes = [UInt8](repeating: 0, count: 8192)
-            bytes[0] = 1
-            for i in 1..<33 { bytes[i] = UInt8.random(in: 0...255) }
-            withUnsafeBytes(of: expires.bigEndian) { for (k, v) in $0.enumerated() { bytes[33 + k] = v } }
-            return RelayEnvelope(parsing: Data(bytes))!
-        }
-        let mallory = ContactID(rawValue: "mallory"), honestFriends = (0..<10).map { ContactID(rawValue: "friend\($0)") }
-        var junkCount = 0
-        for _ in 0..<RelayLimits.perDepositorMax where carrier.carry(junk(), from: mallory) { junkCount += 1 }
-        #expect(junkCount * 8192 <= RelayLimits.perDepositorMaxBytes, "one contact keeps at most a fifth of the store")
-        var p = RPair()
-        let sealedReal = p.seal("real mail")
-        let realEntry = try #require(sealedReal)
-        let real = try #require(RelayEnvelope(parsing: realEntry.envelope))
-        let accepted = carrier.carry(real, from: honestFriends[0])
-        #expect(accepted)
-        // Honest 8 KB envelopes from everyone else: how many still fit?
-        var honest = 0
-        for i in 0..<100 where carrier.carry(junk(), from: honestFriends[i % 10]) { honest += 1 }
-        #expect(honest >= 50, "after one contact's junk only \(honest) honest 8 KB envelopes fit")
-
-        // After a restart the phone no longer knows who gave what. Mallory deposits a fresh fifth,
-        // yet the others' next deposits still fit, by pushing out the oldest (unattributed) mail.
-        var restarted = RelayState(keysData: nil, carryData: carrier.encodedCarry())
-        var again = 0
-        for _ in 0..<RelayLimits.perDepositorMax where restarted.carry(junk(), from: mallory) { again += 1 }
-        #expect(again * 8192 <= RelayLimits.perDepositorMaxBytes)
-        var honestAfter = 0
-        for i in 0..<50 where restarted.carry(junk(), from: honestFriends[i % 10]) { honestAfter += 1 }
-        #expect(honestAfter == 50)
-        #expect(restarted.usage(of: mallory.rawValue).bytes <= RelayLimits.perDepositorMaxBytes)
-        #expect(restarted.carriedBytes <= RelayLimits.carryMaxBytes)
-    }
 
     // P5: an honest carrier on a slow link trips the incoming rate limit and its link is closed.
     @Test func honestTrickleTripsRateLimit() async throws {
@@ -264,56 +210,10 @@ private struct Trio {
     }
 
     // P7: "Off" is not fail-closed: an unreadable relay-keys file turns relaying back on.
-    @Test func offSettingRevertsToFriendsWhenKeysUnreadable() {
-        var keys = RelayKeys(); keys.carryMode = .off
-        var data = (try? JSONEncoder().encode(keys)) ?? Data()
-        data.removeLast() // truncated / corrupt / unreadable
-        let loaded = RelayState(keysData: data, carryData: nil)
-        #expect(loaded.keys.carryMode == .off)
-    }
 
     // P8: with asymmetric confirmation the peer retires the generation still in use after 7 days.
-    @Test func unconfirmedSideKeepsUsingAGenerationThePeerRetires() throws {
-        var p = RPair()
-        // A new direct link: Ben installs g2 and confirms it; Asha never got Ben's relaySync (link dropped).
-        let later = p.now.addingTimeInterval(3600)
-        _ = p.b.installGeneration(contact: p.bSeesA, root: SymmetricKey(size: .bits256), ownIdentityKey: p.bKey,
-                                  peerIdentityKey: p.aKey, now: later)
-        let day8 = p.now.addingTimeInterval(8 * 86_400)
-        _ = p.b.purge(now: day8)
-        let sealed = p.a.seal(text: "day 8", messageID: UUID(), sentAt: day8, to: p.aSeesB, now: day8)
-        let entry = try #require(sealed)
-        #expect(p.a.hasConfirmedGeneration(p.aSeesB), "Asha's UI still says relaying is available")
-        let env = try #require(RelayEnvelope(parsing: entry.envelope))
-        let result = p.b.open(env, now: day8)
-        #expect(result != .notMine, "Ben can no longer open anything Asha seals")
-    }
 
     // P9: main-thread cost of the per-packet save and of `isHeld` with a full own outbox.
-    @Test func perPacketCosts() throws {
-        var carrier = RelayState()
-        let expires = RelayEnvelope.expiresHour(at: Date())
-        for _ in 0..<1000 {
-            var bytes = [UInt8](repeating: 0, count: 2048); bytes[0] = 1
-            for i in 1..<33 { bytes[i] = UInt8.random(in: 0...255) }
-            withUnsafeBytes(of: expires.bigEndian) { for (k, v) in $0.enumerated() { bytes[33 + k] = v } }
-            _ = carrier.carry(RelayEnvelope(parsing: Data(bytes))!)
-        }
-        for i in 0..<RelayLimits.maxSeen {
-            var id = Data(count: 8); withUnsafeBytes(of: UInt64(i).bigEndian) { id = Data($0) }
-            carrier.markSeen(id, receiptHash: Data(count: 16), now: Date())
-        }
-        let clock = ContinuousClock()
-        let encode = clock.measure { for _ in 0..<100 { _ = carrier.encodedCarry() } }
-        var sender = RPair()
-        var own = 0
-        while sender.seal(String(repeating: "y", count: 3000)) != nil { own += 1 }
-        let ids = (0..<512).map { _ in Data((0..<8).map { _ in UInt8.random(in: 0...255) }) }
-        let held = clock.measure { for id in ids { _ = sender.a.isHeld(id) } }
-        let keysTime = clock.measure { for _ in 0..<10 { _ = sender.a.encodedKeys() } }
-        print("P9 encodedKeys x10 with \(own) own 8 KB envelopes: \(keysTime), size \(sender.a.encodedKeys().count) bytes")
-        print("P9 encodedCarry x100 (one 100-envelope batch): \(encode); isHeld x512 over \(own) own 8 KB envelopes (one offer): \(held)")
-    }
 
     // P10: a contact can ask for the same envelopes again and again; each request is answered in full.
     @Test func repeatedWantsAreAnsweredEveryTime() async throws {
@@ -401,18 +301,6 @@ private struct Trio {
         #expect(reloaded.keys.pairs[id.rawValue]?.send?.index == 1, "the advanced chain is what is on disk")
     }
 
-    @Test func eraseCarriedMailForgetsWhatWasSeenToo() throws {
-        var state = RelayState()
-        var p = RPair()
-        let sealed = p.seal("x")
-        let entry = try #require(sealed)
-        let envelope = try #require(RelayEnvelope(parsing: entry.envelope))
-        state.markSeen(envelope.id, receiptHash: envelope.receiptHash, now: Date())
-        let carried = state.carry(envelope)
-        #expect(carried)
-        state.eraseCarried()
-        #expect(state.carried.isEmpty && state.seen.isEmpty && state.receipts.isEmpty)
-    }
 
     /// M6 end to end: each phone tells the other once it seals under the new generation.
     @Test func confirmationReachesTheOtherPhone() async throws {
@@ -505,15 +393,16 @@ final class CountingPersistence: Persistence, @unchecked Sendable {
                           identityStore: InMemoryIdentityStore(), configuration: config)
         c.completeOnboarding(displayName: "Chidi")
         c.start()
-        // 100 envelopes Asha carries for strangers, then Asha meets Chidi.
-        var stranger = RPair()
-        for i in 0..<100 {
-            let sealed = stranger.seal("for someone else \(i)")
-            let entry = try #require(sealed)
-            let envelope = try #require(RelayEnvelope(parsing: entry.envelope))
-            _ = a.messenger.relay.carry(envelope)
-            for index in stranger.a.keys.outbox.indices { stranger.a.keys.outbox[index].expired = true }
-        }
+        // 100 envelopes Asha carries for strangers, then Asha meets Chidi. Sealed off the main actor.
+        let envelopes = await Task.detached { () -> [RelayEnvelope] in
+            var stranger = RPair()
+            return (0..<100).compactMap { i -> RelayEnvelope? in
+                let sealed = stranger.seal("for someone else \(i)")
+                return sealed.flatMap { RelayEnvelope(parsing: $0.envelope) }
+            }
+        }.value
+        try #require(envelopes.count == 100)
+        for envelope in envelopes { _ = a.messenger.relay.carry(envelope) }
         let before = store.count(Messenger.relayCarryBlob)
         let peer = try #require(a.messenger.nearbyPeers.first { $0.id.rawValue == "chidi-count" })
         a.messenger.connect(to: peer)
@@ -524,5 +413,134 @@ final class CountingPersistence: Persistence, @unchecked Sendable {
         let writes = store.count(Messenger.relayCarryBlob) - before
         print("carry store writes for a 100-envelope batch: \(writes)")
         #expect(writes >= 1 && writes <= 4)
+    }
+}
+
+/// The review's pure state tests. Deliberately NOT on the main actor: they are CPU-heavy, and all
+/// main-actor tests share one thread, so running them there starved the timing-based integration
+/// tests (their waits expired while these held the main thread).
+@Suite struct RelayReviewStateTests {
+    // Pure state work: runs off the main actor, so its CPU time never starves the main-actor tests.
+    @Test func deletionRaisesFloorPastRecipientWindow() throws {
+        var q = RPair()
+        for _ in 0..<200 {
+            let e = q.seal()
+            let id = try #require(e).messageID
+            _ = q.a.removeOutbox(messageID: id)            // the user deletes the unsent message
+        }
+        var next: [RelayOutgoing] = []
+        while let e = q.seal() { next.append(e) }
+        let lastEntry = try #require(next.last)
+        let last = try #require(RelayEnvelope(parsing: lastEntry.envelope))
+        // Adapted after the fix: deleting copies no longer moves the window, so sealing stops at 255,
+        // the last index Ben can recognise, and that one opens.
+        #expect(lastEntry.index == 255)
+        let result = q.b.open(last, now: q.now)
+        #expect(result != .notMine, "index 255 must be inside Ben's window (0...255)")
+    }
+
+    // Pure state work: runs off the main actor, so its CPU time never starves the main-actor tests.
+    @Test func oneDepositorFillsTheWholeCarryQuota() throws {
+        var carrier = RelayState()
+        let expires = RelayEnvelope.expiresHour(at: Date())
+        func junk() -> RelayEnvelope {
+            var bytes = [UInt8](repeating: 0, count: 8192)
+            bytes[0] = 1
+            for i in 1..<33 { bytes[i] = UInt8.random(in: 0...255) }
+            withUnsafeBytes(of: expires.bigEndian) { for (k, v) in $0.enumerated() { bytes[33 + k] = v } }
+            return RelayEnvelope(parsing: Data(bytes))!
+        }
+        let mallory = ContactID(rawValue: "mallory"), honestFriends = (0..<10).map { ContactID(rawValue: "friend\($0)") }
+        var junkCount = 0
+        for _ in 0..<RelayLimits.perDepositorMax where carrier.carry(junk(), from: mallory) { junkCount += 1 }
+        #expect(junkCount * 8192 <= RelayLimits.perDepositorMaxBytes, "one contact keeps at most a fifth of the store")
+        var p = RPair()
+        let sealedReal = p.seal("real mail")
+        let realEntry = try #require(sealedReal)
+        let real = try #require(RelayEnvelope(parsing: realEntry.envelope))
+        let accepted = carrier.carry(real, from: honestFriends[0])
+        #expect(accepted)
+        // Honest 8 KB envelopes from everyone else: how many still fit?
+        var honest = 0
+        for i in 0..<100 where carrier.carry(junk(), from: honestFriends[i % 10]) { honest += 1 }
+        #expect(honest >= 50, "after one contact's junk only \(honest) honest 8 KB envelopes fit")
+
+        // After a restart the phone no longer knows who gave what. Mallory deposits a fresh fifth,
+        // yet the others' next deposits still fit, by pushing out the oldest (unattributed) mail.
+        var restarted = RelayState(keysData: nil, carryData: carrier.encodedCarry())
+        var again = 0
+        for _ in 0..<RelayLimits.perDepositorMax where restarted.carry(junk(), from: mallory) { again += 1 }
+        #expect(again * 8192 <= RelayLimits.perDepositorMaxBytes)
+        var honestAfter = 0
+        for i in 0..<50 where restarted.carry(junk(), from: honestFriends[i % 10]) { honestAfter += 1 }
+        #expect(honestAfter == 50)
+        #expect(restarted.usage(of: mallory.rawValue).bytes <= RelayLimits.perDepositorMaxBytes)
+        #expect(restarted.carriedBytes <= RelayLimits.carryMaxBytes)
+    }
+
+    // Pure state work: runs off the main actor, so its CPU time never starves the main-actor tests.
+    @Test func offSettingRevertsToFriendsWhenKeysUnreadable() {
+        var keys = RelayKeys(); keys.carryMode = .off
+        var data = (try? JSONEncoder().encode(keys)) ?? Data()
+        data.removeLast() // truncated / corrupt / unreadable
+        let loaded = RelayState(keysData: data, carryData: nil)
+        #expect(loaded.keys.carryMode == .off)
+    }
+
+    // Pure state work: runs off the main actor, so its CPU time never starves the main-actor tests.
+    @Test func unconfirmedSideKeepsUsingAGenerationThePeerRetires() throws {
+        var p = RPair()
+        // A new direct link: Ben installs g2 and confirms it; Asha never got Ben's relaySync (link dropped).
+        let later = p.now.addingTimeInterval(3600)
+        _ = p.b.installGeneration(contact: p.bSeesA, root: SymmetricKey(size: .bits256), ownIdentityKey: p.bKey,
+                                  peerIdentityKey: p.aKey, now: later)
+        let day8 = p.now.addingTimeInterval(8 * 86_400)
+        _ = p.b.purge(now: day8)
+        let sealed = p.a.seal(text: "day 8", messageID: UUID(), sentAt: day8, to: p.aSeesB, now: day8)
+        let entry = try #require(sealed)
+        #expect(p.a.hasConfirmedGeneration(p.aSeesB), "Asha's UI still says relaying is available")
+        let env = try #require(RelayEnvelope(parsing: entry.envelope))
+        let result = p.b.open(env, now: day8)
+        #expect(result != .notMine, "Ben can no longer open anything Asha seals")
+    }
+
+    // Pure state work: runs off the main actor, so its CPU time never starves the main-actor tests.
+    @Test func perPacketCosts() throws {
+        var carrier = RelayState()
+        let expires = RelayEnvelope.expiresHour(at: Date())
+        for _ in 0..<1000 {
+            var bytes = [UInt8](repeating: 0, count: 2048); bytes[0] = 1
+            for i in 1..<33 { bytes[i] = UInt8.random(in: 0...255) }
+            withUnsafeBytes(of: expires.bigEndian) { for (k, v) in $0.enumerated() { bytes[33 + k] = v } }
+            _ = carrier.carry(RelayEnvelope(parsing: Data(bytes))!)
+        }
+        for i in 0..<RelayLimits.maxSeen {
+            var id = Data(count: 8); withUnsafeBytes(of: UInt64(i).bigEndian) { id = Data($0) }
+            carrier.markSeen(id, receiptHash: Data(count: 16), now: Date())
+        }
+        let clock = ContinuousClock()
+        let encode = clock.measure { for _ in 0..<100 { _ = carrier.encodedCarry() } }
+        var sender = RPair()
+        var own = 0
+        while sender.seal(String(repeating: "y", count: 3000)) != nil { own += 1 }
+        let ids = (0..<512).map { _ in Data((0..<8).map { _ in UInt8.random(in: 0...255) }) }
+        let held = clock.measure { for id in ids { _ = sender.a.isHeld(id) } }
+        let keysTime = clock.measure { for _ in 0..<10 { _ = sender.a.encodedKeys() } }
+        print("P9 encodedKeys x10 with \(own) own 8 KB envelopes: \(keysTime), size \(sender.a.encodedKeys().count) bytes")
+        print("P9 encodedCarry x100 (one 100-envelope batch): \(encode); isHeld x512 over \(own) own 8 KB envelopes (one offer): \(held)")
+    }
+
+    // Pure state work: runs off the main actor, so its CPU time never starves the main-actor tests.
+    @Test func eraseCarriedMailForgetsWhatWasSeenToo() throws {
+        var state = RelayState()
+        var p = RPair()
+        let sealed = p.seal("x")
+        let entry = try #require(sealed)
+        let envelope = try #require(RelayEnvelope(parsing: entry.envelope))
+        state.markSeen(envelope.id, receiptHash: envelope.receiptHash, now: Date())
+        let carried = state.carry(envelope)
+        #expect(carried)
+        state.eraseCarried()
+        #expect(state.carried.isEmpty && state.seen.isEmpty && state.receipts.isEmpty)
     }
 }

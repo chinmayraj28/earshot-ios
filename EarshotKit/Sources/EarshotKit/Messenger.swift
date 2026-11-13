@@ -475,7 +475,7 @@ public final class Messenger {
         trimHistory(id)
         transmit(message.id, to: id)
         persist(id)
-        relaySealWaiting()
+        relaySealWaiting(only: id)
         // In range but not linked (for example after several failed attempts): try again now.
         if link(to: id) == nil { autoConnect(id) }
         return conversations[id]?.messages.first { $0.id == message.id }

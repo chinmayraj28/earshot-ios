@@ -123,28 +123,28 @@ if [[ "$ONLY" == all || "$ONLY" == static ]]; then
     s=""; [[ $appearance == dark ]] && s="-dark"
     home="home-light"; [[ $appearance == dark ]] && home="home-dark"
     shot "$home"                  $appearance $L 4.5 -- -demo populated
-    shot "chat$s"                 $appearance $L 4.5 -- -demo populated -screen "chat:Maya Okafor"
-    shot "chat-waiting$s"         $appearance $L 4.5 -- -demo populated -screen "chat:Jonas Weber"
+    shot "chat$s"                 $appearance $L 4.5 -- -demo populated -screen "chat:Jensen Huang"
+    shot "chat-waiting$s"         $appearance $L 4.5 -- -demo populated -screen "chat:Alice Huang"
     shot "incoming-request$s"     $appearance $L 6   -- -demo populated -demoRequest
     shot "onboarding-welcome$s"   $appearance $L 4.5 -- -demo firstRun
     shot "empty-state$s"          $appearance $L 4.5 -- -demo empty
     shot "settings$s"             $appearance $L 4.5 -- -demo populated -screen settings
     shot "how-it-works$s"         $appearance $L 4.5 -- -demo populated -screen howItWorks
     shot "privacy$s"              $appearance $L 4.5 -- -demo populated -screen privacy
-    shot "contact-details$s"      $appearance $L 4.5 -- -demo populated -screen "contact:Maya Okafor"
+    shot "contact-details$s"      $appearance $L 4.5 -- -demo populated -screen "contact:Jensen Huang"
     shot "bluetooth-denied$s"     $appearance $L 4.5 -- -simulateBluetoothDenied
     # Relaying through friends and the Range test (opt-in demo states).
-    shot "relay-sealed$s"         $appearance $L 5   -- -demo populated -demoRelay sealed -screen "chat:Jonas Weber"
-    shot "relay-delivered$s"      $appearance $L 5   -- -demo populated -demoRelay delivered -screen "chat:Jonas Weber"
+    shot "relay-sealed$s"         $appearance $L 5   -- -demo populated -demoRelay sealed -screen "chat:Alice Huang"
+    shot "relay-delivered$s"      $appearance $L 5   -- -demo populated -demoRelay delivered -screen "chat:Alice Huang"
     shot "relay-settings$s"       $appearance $L 6   -- -demo populated -demoRelay carrying -screen settings:relay
-    shot "relay-contact$s"        $appearance $L 5   -- -demo populated -screen "contactRelay:Jonas Weber"
+    shot "relay-contact$s"        $appearance $L 5   -- -demo populated -screen "contactRelay:Alice Huang"
     shot "range-test$s"           $appearance $L 5   -- -demo populated -screen rangeTest
   done
   shot home-large-text            light $XL 4.5 -- -demo populated
-  shot chat-large-text            light $XL 4.5 -- -demo populated -screen "chat:Jonas Weber"
+  shot chat-large-text            light $XL 4.5 -- -demo populated -screen "chat:Alice Huang"
   shot home-accessibility-size    light $AX 4.5 -- -demo populated
   shot settings-accessibility-size light $AX 4.5 -- -demo populated -screen settings
-  shot photo-large-text           light accessibility-medium 4.5 -- -demo populated -screen "chat:Jonas Weber"
+  shot photo-large-text           light accessibility-medium 4.5 -- -demo populated -screen "chat:Alice Huang"
   set_ui light large
 fi
 

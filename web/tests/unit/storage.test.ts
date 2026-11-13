@@ -11,7 +11,7 @@ describe("IndexedDBStorage", () => {
     const storage = new IndexedDBStorage("earshot-test-1");
     expect((await storage.load()).identitySeed).toBeNull();
     const seed = new Uint8Array(32).fill(5);
-    const contact: Contact = { id: "abc", displayName: "Maya", identityKey: new Uint8Array(32).fill(1), addedAt: 1, isBlocked: true, isVerified: true };
+    const contact: Contact = { id: "abc", displayName: "Jensen", identityKey: new Uint8Array(32).fill(1), addedAt: 1, isBlocked: true, isVerified: true };
     const message: Message = { id: "3F2504E0-4F89-11D3-9A0C-0305E82C3301", direction: "outgoing", text: "hi 👋", timestamp: 2, status: "waiting" };
     await storage.saveIdentity(seed);
     await storage.saveProfile({ displayName: "Alex", hasCompletedOnboarding: true });

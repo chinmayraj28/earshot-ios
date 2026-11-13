@@ -13,7 +13,7 @@ final class PhotoAndFormattingUITests: XCTestCase {
     @MainActor
     func testFormattedMessageShowsStylesAndATappableLink() {
         let app = launch("-demo", "populated")
-        tap(app.buttons["conversation.Maya Okafor"], timeout: 20)
+        tap(app.buttons["conversation.Jensen Huang"], timeout: 20)
         let composer = element(app, "chat.composer")
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         composer.tap()
@@ -38,11 +38,11 @@ final class PhotoAndFormattingUITests: XCTestCase {
     @MainActor
     func testSendingAPhotoShowsProgressThenDelivered() {
         let app = launch("-demo", "populated", "-useSamplePhoto")
-        tap(app.buttons["conversation.Maya Okafor"], timeout: 20)
+        tap(app.buttons["conversation.Jensen Huang"], timeout: 20)
         let attach = app.buttons["chat.attach"]
         XCTAssertTrue(attach.waitForExistence(timeout: 10))
-        waitForLabel(element(app, "chat.title"), toContain: "Maya", timeout: 5)
-        // Maya connects a moment after launch; until then the button explains instead.
+        waitForLabel(element(app, "chat.title"), toContain: "Jensen", timeout: 5)
+        // Jensen connects a moment after launch; until then the button explains instead.
         let connected = element(app, "Connected", labelContains: true)
         XCTAssertTrue(connected.waitForExistence(timeout: 15))
         tap(attach)
@@ -60,19 +60,19 @@ final class PhotoAndFormattingUITests: XCTestCase {
         XCTAssertFalse(staged.exists, "The composer is cleared after sending")
         waitForLabel(element(app, "chat.lastStatus"), toContain: "Delivered", timeout: 30)
         XCTAssertTrue(element(app, "Got the photo", labelContains: true).waitForExistence(timeout: 20),
-                      "Maya's phone received it and replied")
+                      "Jensen's phone received it and replied")
     }
 
     @MainActor
     func testPhotoOpensFullScreenWithShareAndDelete() {
         let app = launch("-demo", "populated")
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
         let photo = app.buttons["chat.photo"]
         tap(photo, timeout: 10)
 
         let image = element(app, "viewer.image")
         XCTAssertTrue(image.waitForExistence(timeout: 10), "The viewer should show the photo")
-        XCTAssertTrue(image.label.contains("Photo from Jonas. The queue for the food trucks"), "Got: \(image.label)")
+        XCTAssertTrue(image.label.contains("Photo from Alice. The queue for the food trucks"), "Got: \(image.label)")
         XCTAssertTrue(app.buttons["viewer.share"].exists)
         image.doubleTap() // zoom in, then out
         image.doubleTap()
@@ -93,7 +93,7 @@ final class PhotoAndFormattingUITests: XCTestCase {
     @MainActor
     func testShareSheetOpensWithoutAskingForPhotoAccess() throws {
         let app = launch("-demo", "populated")
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
         tap(app.buttons["chat.photo"], timeout: 10)
         tap(app.buttons["viewer.share"], timeout: 10)
         let copy = app.cells.matching(NSPredicate(format: "label == %@", "Copy")).firstMatch
@@ -111,21 +111,21 @@ final class PhotoAndFormattingUITests: XCTestCase {
     func testAttachExplainsWhyPhotosAreUnavailable() {
         let app = launch("-demo", "populated")
 
-        // Jonas is out of range: photos are only sent over a live link.
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        // Alice is out of range: photos are only sent over a live link.
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
         let attach = app.buttons["chat.attach"]
         XCTAssertTrue(attach.waitForExistence(timeout: 10))
         XCTAssertEqual(attach.value as? String, "Unavailable")
         tap(attach)
         let help = element(app, "chat.attachUnavailable")
         XCTAssertTrue(help.waitForExistence(timeout: 5))
-        XCTAssertTrue(help.label.contains("only be sent while you and Jonas are connected"), "Got: \(help.label)")
+        XCTAssertTrue(help.label.contains("only be sent while you and Alice are connected"), "Got: \(help.label)")
         app.navigationBars.buttons.firstMatch.tap()
 
-        // Elena runs an older Earshot: connected, texting works, photos don't.
-        tap(app.buttons["nearby.connect.Elena Costa"], timeout: 20)
+        // Aubrey runs an older Earshot: connected, texting works, photos don't.
+        tap(app.buttons["nearby.connect.Aubrey Graham"], timeout: 20)
         XCTAssertTrue(element(app, "chat.composer").waitForExistence(timeout: 25))
-        waitForLabel(element(app, "chat.title"), toContain: "Elena", timeout: 5)
+        waitForLabel(element(app, "chat.title"), toContain: "Aubrey", timeout: 5)
         tap(app.buttons["chat.attach"])
         let elenaHelp = element(app, "chat.attachUnavailable")
         XCTAssertTrue(elenaHelp.waitForExistence(timeout: 5))
@@ -141,7 +141,7 @@ final class PhotoAndFormattingUITests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["EARSHOT_SCREENSHOTS"] == "1",
                           "Set TEST_RUNNER_EARSHOT_SCREENSHOTS=1 to capture screenshots")
         let app = launch("-demo", "populated", "-useSamplePhoto")
-        tap(app.buttons["conversation.Maya Okafor"], timeout: 20)
+        tap(app.buttons["conversation.Jensen Huang"], timeout: 20)
         XCTAssertTrue(element(app, "Connected", labelContains: true).waitForExistence(timeout: 15))
         let composer = element(app, "chat.composer")
         composer.tap()
@@ -176,14 +176,14 @@ final class PhotoAndFormattingUITests: XCTestCase {
         XCTAssertTrue(element(app, "Photo. Here you go", labelContains: true).waitForExistence(timeout: 30))
 
         let photos = app.buttons.matching(identifier: "chat.photo")
-        tap(photos.element(boundBy: photos.count - 1)) // the one Maya just sent
+        tap(photos.element(boundBy: photos.count - 1)) // the one Jensen just sent
         XCTAssertTrue(element(app, "viewer.image").waitForExistence(timeout: 10))
         sleep(1)
         attach(app, "photo-viewer")
         tap(app.buttons["viewer.close"])
 
         app.navigationBars.buttons.firstMatch.tap()
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 10)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 10)
         tap(app.buttons["chat.attach"])
         XCTAssertTrue(element(app, "chat.attachUnavailable").waitForExistence(timeout: 5))
         attach(app, "photo-unavailable")

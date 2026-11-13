@@ -104,7 +104,7 @@ enum RelayOpenResult: Equatable {
 
 struct RelayState: Equatable {
     var keys = RelayKeys() {
-        didSet { outboxIDs = Set(keys.outbox.map(\.envelopeID)) }
+        didSet { rebuildOutboxIndex() }
     }
     /// Envelopes carried for others, oldest first. Setting it replaces everything (tests do this);
     /// the relay code itself changes `carriedStorage` and keeps the lookup tables up to date.
@@ -119,6 +119,7 @@ struct RelayState: Equatable {
     private(set) var carriedBytes = 0
     /// Lookup tables, rebuilt whenever `keys` or `carried` change. Never saved.
     private var outboxIDs: Set<Data> = []
+    private var outboxMessageIDs: Set<UUID> = []
     private var carriedIndex: [Data: Int] = [:]
     /// Which contact handed over each carried envelope (by `ContactID.rawValue`). In memory only,
     /// never saved: it enforces the per-contact share and is forgotten on restart.
@@ -158,8 +159,13 @@ struct RelayState: Equatable {
 
     /// Property observers do not run inside initialisers, so the lookup tables are built here too.
     private mutating func rebuildIndexes() {
-        outboxIDs = Set(keys.outbox.map(\.envelopeID))
+        rebuildOutboxIndex()
         reindexCarried()
+    }
+
+    private mutating func rebuildOutboxIndex() {
+        outboxIDs = Set(keys.outbox.map(\.envelopeID))
+        outboxMessageIDs = Set(keys.outbox.map(\.messageID))
     }
 
     /// Rebuilds the carried lookup tables (after removals, which shift positions).
@@ -347,7 +353,7 @@ struct RelayState: Equatable {
         keys.outbox.filter { !$0.expired && (contact == nil || $0.contact == contact) }.count
     }
 
-    func hasOutboxEntry(for messageID: UUID) -> Bool { keys.outbox.contains { $0.messageID == messageID } }
+    func hasOutboxEntry(for messageID: UUID) -> Bool { outboxMessageIDs.contains(messageID) }
 
     /// Seals a text message for a contact, advancing the chain. Returns nil (and changes nothing)
     /// when there is no confirmed generation, a cap is reached, or the text does not fit 8,192 bytes.

@@ -15,8 +15,8 @@ test("strict Content-Security-Policy is in place and the app runs under it", asy
   expect(csp).toContain("script-src 'self'");
   expect(csp).not.toContain("unsafe-inline");
   expect(csp).toContain("connect-src 'self'");
-  await row(page, "Maya Okafor").click();
-  await expect(page.locator(".chat__name")).toContainText("Maya Okafor");
+  await row(page, "Jensen Huang").click();
+  await expect(page.locator(".chat__name")).toContainText("Jensen Huang");
   expect(violations).toEqual([]);
   // No inline scripts in the built page.
   expect(await page.locator("script:not([src])").count()).toBe(0);
@@ -37,8 +37,8 @@ test("after one visit the app opens with no network at all", async ({ page, cont
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Conversations" })).toBeVisible();
-  await row(page, "Maya Okafor").click();
-  await expect(page.locator(".chat__name")).toContainText("Maya Okafor");
+  await row(page, "Jensen Huang").click();
+  await expect(page.locator(".chat__name")).toContainText("Jensen Huang");
   await context.setOffline(false);
 });
 

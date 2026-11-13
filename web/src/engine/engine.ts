@@ -13,7 +13,7 @@
  *                  A saved contact: both first send a "knock"; each reveals itself only after a valid one.
  *   established    Messages and receipts flow. Waiting messages are sent now.
  *
- * Example: Alex clicks "Find nearby", picks Maya's iPhone. Maya taps Accept. A few hundred
+ * Example: Alex clicks "Find nearby", picks Jensen's iPhone. Jensen taps Accept. A few hundred
  * milliseconds later both screens show the same safety code and Alex's queued messages go out.
  */
 import type { Availability, ConnectionRequest, ContactID, FindResult, LinkState, MessageID, PeerToken } from "./api";

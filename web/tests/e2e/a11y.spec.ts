@@ -25,13 +25,13 @@ for (const scheme of ["light", "dark"] as const) {
     test("list and chat", async ({ page }) => {
       await openDemo(page, "populated");
       await expectNoViolations(page);
-      await row(page, "Jonas Weber").click();
+      await row(page, "Alice Huang").click();
       await expectNoViolations(page);
     });
 
     test("contact details and settings", async ({ page }) => {
       await openDemo(page, "populated");
-      await row(page, "Maya Okafor").click();
+      await row(page, "Jensen Huang").click();
       await page.getByRole("button", { name: "Contact details", exact: true }).click();
       await expectNoViolations(page);
       await page.getByRole("button", { name: "Settings" }).click();

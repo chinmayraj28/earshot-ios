@@ -6,11 +6,11 @@ test("populated list shows names, previews, link state and unread counts", async
   const rows = page.locator(".sidebar .row");
   await expect(rows).not.toHaveCount(0);
 
-  const maya = row(page, "Maya Okafor");
+  const maya = row(page, "Jensen Huang");
   await expect(maya).toContainText("Connected");
   await expect(maya.locator(".row__seal")).toBeVisible();
 
-  const jonas = row(page, "Jonas Weber");
+  const jonas = row(page, "Alice Huang");
   await expect(jonas).toContainText("Waiting:");
   await expect(jonas).not.toContainText("Connected");
 

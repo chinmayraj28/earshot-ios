@@ -478,20 +478,20 @@ final class RawPeer {
         let world = DemoWorld(scenario: .populated, latency: nil)
         let me = world.messenger
         me.start()
-        let maya = try #require(me.contacts.first { $0.displayName == "Maya Okafor" })
-        let jonas = try #require(me.contacts.first { $0.displayName == "Jonas Weber" })
-        await waitUntil("Maya connects") { me.linkState(for: maya.id) == .connected }
+        let maya = try #require(me.contacts.first { $0.displayName == "Jensen Huang" })
+        let jonas = try #require(me.contacts.first { $0.displayName == "Alice Huang" })
+        await waitUntil("Jensen connects") { me.linkState(for: maya.id) == .connected }
         #expect(me.linkState(for: jonas.id) == .outOfRange)
-        #expect(me.nearbyPeers.filter { $0.contactID == nil }.map(\.displayName).sorted() == ["Elena Costa", "Tomás"])
+        #expect(me.nearbyPeers.filter { $0.contactID == nil }.map(\.displayName).sorted() == ["Aubrey Graham", "Tomás"])
 
         me.send("Are you there?", to: maya.id)
         #expect(me.messages(for: maya.id).last?.status == .delivered)
-        await waitUntil("Maya replies", timeout: .seconds(5)) { me.messages(for: maya.id).last?.direction == .incoming }
+        await waitUntil("Jensen replies", timeout: .seconds(5)) { me.messages(for: maya.id).last?.direction == .incoming }
 
-        world.setInRange(false, name: "Maya Okafor")
+        world.setInRange(false, name: "Jensen Huang")
         #expect(me.linkState(for: maya.id) == .outOfRange)
-        world.setInRange(true, name: "Maya Okafor")
-        await waitUntil("Maya reconnects") { me.linkState(for: maya.id) == .connected }
+        world.setInRange(true, name: "Jensen Huang")
+        await waitUntil("Jensen reconnects") { me.linkState(for: maya.id) == .connected }
 
         world.receiveRequest()
         await waitUntil("incoming request", timeout: .seconds(5)) { me.requests.contains { $0.direction == .incoming } }

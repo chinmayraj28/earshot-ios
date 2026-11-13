@@ -62,7 +62,7 @@ for (const [outcome, text] of requestFailures) {
 
 test("Reconnect from an out-of-range chat sends the waiting message", async ({ page }) => {
   await openDemo(page, "populated", "savedContact");
-  await row(page, "Jonas Weber").click();
+  await row(page, "Alice Huang").click();
   const waiting = page.locator('.message[data-status="waiting"]').first();
   await expect(waiting).toBeVisible();
   await page.getByRole("button", { name: "Reconnect" }).click();

@@ -19,9 +19,9 @@ public final class DemoWorld {
     /// Opt-in relaying states for screenshots and UI tests (`-demoRelay …`). With the default
     /// (nothing set) the demo is exactly as before. Only used with the `populated` scenario.
     public struct RelayDemo: Sendable, Equatable {
-        /// Jonas's waiting message is sealed and this many friends' phones hold a copy.
+        /// Alice's waiting message is sealed and this many friends' phones hold a copy.
         public var sealedHandoffs: Int?
-        /// Jonas's last message came back Delivered through friends, and his reply arrived the same way.
+        /// Alice's last message came back Delivered through friends, and his reply arrived the same way.
         public var deliveredViaFriends = false
         /// This phone is carrying a few sealed messages for friends.
         public var carrying = false
@@ -69,16 +69,16 @@ public final class DemoWorld {
         }
         let attachments = AttachmentStore()
         if scenario == .populated {
-            let mayaContact = Contact(id: maya.contactID, displayName: "Maya Okafor", identityKey: maya.publicKey,
+            let mayaContact = Contact(id: maya.contactID, displayName: "Jensen Huang", identityKey: maya.publicKey,
                                       addedAt: now.addingTimeInterval(-86_400 * 3), isVerified: true)
-            let jonasContact = Contact(id: jonas.contactID, displayName: "Jonas Weber", identityKey: jonas.publicKey,
+            let jonasContact = Contact(id: jonas.contactID, displayName: "Alice Huang", identityKey: jonas.publicKey,
                                        addedAt: now.addingTimeInterval(-86_400 * 9))
             state.contacts = [mayaContact, jonasContact]
             func message(_ direction: Message.Direction, _ text: String, _ minutesAgo: Double,
                          _ status: DeliveryStatus = .delivered) -> Message {
                 Message(direction: direction, text: text, timestamp: now.addingTimeInterval(-minutesAgo * 60), status: status)
             }
-            // One photo already in Jonas's history, stored like a received one.
+            // One photo already in Alice's history, stored like a received one.
             var photoMessage: [Message] = []
             if let picture = try? PhotoProcessing.prepare(.data(PhotoProcessing.sampleJPEG(width: 1600, height: 1200, seed: 1))) {
                 let id = UUID()
@@ -124,11 +124,11 @@ public final class DemoWorld {
 
         guard scenario != .empty else { return }
         let meContact = Contact(id: me.contactID, displayName: "Chinmay", identityKey: me.publicKey)
-        addBot("Maya Okafor", identity: maya, knows: scenario == .populated ? [meContact] : [], accepts: true)
-        // Elena runs an older Earshot that cannot receive photos, so that state can be seen.
-        addBot("Elena Costa", identity: Identity(), knows: [], accepts: true, legacy: true)
+        addBot("Jensen Huang", identity: maya, knows: scenario == .populated ? [meContact] : [], accepts: true)
+        // Aubrey runs an older Earshot that cannot receive photos, so that state can be seen.
+        addBot("Aubrey Graham", identity: Identity(), knows: [], accepts: true, legacy: true)
         addBot("Tomás", identity: Identity(), knows: [], accepts: false)
-        // Jonas is a saved contact who is not around, so he gets no bot.
+        // Alice is a saved contact who is not around, so he gets no bot.
     }
 
     /// Puts the engine's relay state into a demo situation. The keys and envelopes are made up
@@ -142,13 +142,13 @@ public final class DemoWorld {
             bytes.append(random(size - bytes.count))
             return bytes
         }
-        // As if Chinmay and Jonas had confirmed relay keys the last time they met.
+        // As if Chinmay and Alice had confirmed relay keys the last time they met.
         let generation = random(8)
         if demo.sealedHandoffs != nil || demo.deliveredViaFriends {
             messenger.relay.keys.pairs[jonas.rawValue] = PairKeys(send: SendChain(generation: generation, index: 1, key: random(32)))
         }
         if let handoffs = demo.sealedHandoffs, let waiting = jonasWaitingID {
-            // Friends' phones that took a copy: Maya, plus made-up others (never shown by name).
+            // Friends' phones that took a copy: Jensen, plus made-up others (never shown by name).
             let carriers = [maya] + (0..<max(0, handoffs - 1)).map { ContactID(rawValue: "demo-friend-\($0)") }
             messenger.relay.keys.outbox.append(RelayOutgoing(
                 messageID: waiting, contact: jonas, envelope: envelope(size: 512), receiptSecret: random(16),

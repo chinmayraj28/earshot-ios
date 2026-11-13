@@ -20,6 +20,9 @@ import Testing
         // seconds rather than a minute; the sender still keeps under the receiver's allowance.
         config.incomingRate = 200
         config.outgoingTextRate = 180
+        // These tests are about the direct path; relaying would also seal 200 envelopes of 8 KB on
+        // the main actor, which only slows every other test running alongside.
+        config.announcesRelay = false
         configure(&config)
         let a = makePhone(hub, "Asha", configuration: config)
         let b = makePhone(hub, "Ben", configuration: config)

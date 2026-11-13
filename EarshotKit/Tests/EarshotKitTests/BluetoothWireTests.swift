@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Bluetooth wire format")
 struct BluetoothWireTests {
-    private func advertisement(name: String = "Maya Okafor") -> LocalAdvertisement {
+    private func advertisement(name: String = "Jensen Huang") -> LocalAdvertisement {
         LocalAdvertisement(displayName: name, nonce: Data([1, 2, 3, 4, 5, 6, 7, 8]),
                            tag: Data([9, 8, 7, 6, 5, 4, 3, 2]), isVisible: true)
     }

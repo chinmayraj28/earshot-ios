@@ -19,9 +19,9 @@ describe("demo engine", () => {
     const populated = createDemoEngine("populated").getSnapshot();
     expect(populated.availability).toBe("ready");
     expect(populated.conversations.map((c) => [c.contact.displayName, c.link, c.unreadCount])).toEqual([
-      ["Elena Costa", "connected", 2],
-      ["Maya Okafor", "connected", 0],
-      ["Jonas Weber", "outOfRange", 0],
+      ["Aubrey Graham", "connected", 2],
+      ["Jensen Huang", "connected", 0],
+      ["Alice Huang", "outOfRange", 0],
       ["Sam Lee", "outOfRange", 0],
     ]);
     expect(populated.contacts.find((c) => c.displayName === "Sam Lee")?.isBlocked).toBe(true);
@@ -59,7 +59,7 @@ describe("demo engine", () => {
 
   it("delivers to connected contacts and keeps messages waiting for out-of-range ones", async () => {
     const engine = createDemoEngine("populated", { findOutcomes: ["savedContact"] });
-    const [maya, jonas] = ["Maya Okafor", "Jonas Weber"].map((n) => engine.getSnapshot().contacts.find((c) => c.displayName === n)!.id);
+    const [maya, jonas] = ["Jensen Huang", "Alice Huang"].map((n) => engine.getSnapshot().contacts.find((c) => c.displayName === n)!.id);
     const sent = engine.send("on my way", maya!)!;
     expect(sent.status).toBe("sending");
     await vi.advanceTimersByTimeAsync(DemoTiming.deliverMs);
@@ -95,7 +95,7 @@ describe("demo engine", () => {
       { kind: "failed", failure: "verificationFailed" },
       { kind: "failed", failure: "incompatibleVersion" },
     ]);
-    const maya = engine.getSnapshot().contacts.find((c) => c.displayName === "Maya Okafor")!.id;
+    const maya = engine.getSnapshot().contacts.find((c) => c.displayName === "Jensen Huang")!.id;
     const received: string[] = [];
     engine.onEvent((e) => e.kind === "messageReceived" && received.push(e.message.text));
     engine.send("meet at the stairs?", maya);

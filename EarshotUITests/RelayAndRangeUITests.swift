@@ -35,7 +35,7 @@ final class RelayAndRangeUITests: XCTestCase {
     @MainActor
     func testSealedMessageCountsFriendsPhonesAndIsNotDelivered() {
         let app = launch("-demo", "populated", "-demoRelay", "sealed")
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
 
         let status = element(app, "chat.lastStatus")
         XCTAssertTrue(status.waitForExistence(timeout: 10))
@@ -47,7 +47,7 @@ final class RelayAndRangeUITests: XCTestCase {
     @MainActor
     func testSealedMessageWithOneFriendUsesSingular() {
         let app = launch("-demo", "populated", "-demoRelay", "sealed", "-demoRelayHandoffs", "1")
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
         let status = element(app, "chat.lastStatus")
         XCTAssertTrue(status.waitForExistence(timeout: 10))
         XCTAssertTrue(status.label.contains("One friend's phone has a copy"), "Got: \(status.label)")
@@ -56,7 +56,7 @@ final class RelayAndRangeUITests: XCTestCase {
     @MainActor
     func testDeliveredAndIncomingThroughFriendsAreMarked() {
         let app = launch("-demo", "populated", "-demoRelay", "delivered")
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
 
         let status = element(app, "chat.lastStatus")
         XCTAssertTrue(status.waitForExistence(timeout: 10))
@@ -70,10 +70,10 @@ final class RelayAndRangeUITests: XCTestCase {
     @MainActor
     func testPlainWaitingWhenRelayingIsNotAvailable() {
         let app = launch("-demo", "populated")
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
         let status = element(app, "chat.lastStatus")
         XCTAssertTrue(status.waitForExistence(timeout: 10))
-        XCTAssertTrue(status.label.hasPrefix("Waiting for Jonas"), "Got: \(status.label)")
+        XCTAssertTrue(status.label.hasPrefix("Waiting for Alice"), "Got: \(status.label)")
         XCTAssertFalse(status.label.contains("ealed"))
         XCTAssertTrue(element(app, "chat.banner").label.contains("messages wait until you are near each other"))
     }
@@ -81,7 +81,7 @@ final class RelayAndRangeUITests: XCTestCase {
     @MainActor
     func testContactDetailsSaysWhenRelayingStarts() {
         let app = launch("-demo", "populated")
-        tap(app.buttons["conversation.Jonas Weber"], timeout: 20)
+        tap(app.buttons["conversation.Alice Huang"], timeout: 20)
         tap(app.buttons["chat.details"])
         let row = element(app, "contact.relay")
         scrollTo(row, in: app)

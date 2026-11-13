@@ -5,7 +5,7 @@ import { graphemeCount, isValidMessageText, sanitizedName, trimmed } from "../..
 
 describe("sanitizedName", () => {
   it("cleans names like the phone does", () => {
-    expect(sanitizedName("  Maya\n  Okafor​ ")).toBe("Maya Okafor");
+    expect(sanitizedName("  Jensen\n  Huang​ ")).toBe("Jensen Huang");
     expect(sanitizedName("a\u0000b\tc")).toBe("abc");
     expect(sanitizedName("Zoë 🌙")).toBe("Zoë 🌙");
     expect(sanitizedName("x".repeat(40))).toBe("x".repeat(32));

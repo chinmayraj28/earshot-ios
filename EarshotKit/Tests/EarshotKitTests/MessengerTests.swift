@@ -113,14 +113,15 @@ import Testing
         let hub = LoopbackHub(latency: .milliseconds(2))
         let a = makePhone(hub, "Alex"), b = makePhone(hub, "Blake")
         await waitUntil("discovery") { !a.messenger.nearbyPeers.isEmpty && !b.messenger.nearbyPeers.isEmpty }
-        a.messenger.connect(to: a.messenger.nearbyPeers[0])
-        b.messenger.connect(to: b.messenger.nearbyPeers[0])
+        // `#require` rather than `[0]`: if a wait above timed out, stop this test instead of crashing the run.
+        a.messenger.connect(to: try #require(a.messenger.nearbyPeers.first))
+        b.messenger.connect(to: try #require(b.messenger.nearbyPeers.first))
         await waitUntil("both connected") {
             a.messenger.contacts.count == 1 && b.messenger.contacts.count == 1
                 && a.messenger.linkState(for: a.messenger.contacts[0].id) == .connected
                 && b.messenger.linkState(for: b.messenger.contacts[0].id) == .connected
         }
-        let id = a.messenger.contacts[0].id
+        let id = try #require(a.messenger.contacts.first).id
         a.messenger.send("hi", to: id)
         await waitUntil("delivered") { a.messenger.messages(for: id).last?.status == .delivered }
     }
@@ -311,7 +312,7 @@ import Testing
             a.messenger.contacts.count == 1 && a.messenger.linkState(for: a.messenger.contacts[0].id) == .connected
                 && b.messenger.linkState(for: ids.bSeesA) == .connected
         }
-        #expect(a.messenger.contacts[0].identityKey == b.messenger.identityKey)
+        #expect(try #require(a.messenger.contacts.first).identityKey == b.messenger.identityKey)
     }
 
     @Test func removedPersonCanAskAgainWithAPrompt() async throws {
@@ -391,7 +392,7 @@ import Testing
         #expect(store.load().contacts.isEmpty)
 
         let identity = Identity()
-        let contact = Contact(id: identity.contactID, displayName: "Maya", identityKey: identity.publicKey, isVerified: true)
+        let contact = Contact(id: identity.contactID, displayName: "Jensen", identityKey: identity.publicKey, isVerified: true)
         let conversation = Conversation(messages: [Message(direction: .outgoing, text: "hi 👋", status: .delivered)], unreadCount: 2)
         store.save(profile: Profile(displayName: "Alex", isVisible: false, hasCompletedOnboarding: true))
         store.save(contacts: [contact])
@@ -422,7 +423,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = FilePersistence(directory: directory)
         let identity = Identity()
-        let contact = Contact(id: identity.contactID, displayName: "Maya", identityKey: identity.publicKey)
+        let contact = Contact(id: identity.contactID, displayName: "Jensen", identityKey: identity.publicKey)
         store.save(contacts: [contact])
         var conversation = Conversation()
         let confirmations = (0..<200).map { _ in Confirmation() }

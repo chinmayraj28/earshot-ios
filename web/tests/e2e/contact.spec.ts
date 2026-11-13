@@ -9,7 +9,7 @@ async function openDetails(page: Page, name: string) {
 
 test("safety code and verification", async ({ page }) => {
   await openDemo(page, "populated");
-  await openDetails(page, "Jonas Weber");
+  await openDetails(page, "Alice Huang");
   await expect(page.locator(".safety__code")).toHaveText(/^\d{3} \d{3} \d{3}$/);
   await expect(page.locator(".safety__state")).toHaveText("Not verified");
   await page.getByRole("button", { name: "Mark as verified" }).click();
@@ -20,43 +20,43 @@ test("safety code and verification", async ({ page }) => {
 
 test("block asks first, then blocks; unblock works", async ({ page }) => {
   await openDemo(page, "populated");
-  await openDetails(page, "Maya Okafor");
-  await page.getByRole("button", { name: "Block Maya Okafor" }).click();
-  const dialog = page.getByRole("dialog", { name: "Block Maya Okafor?" });
+  await openDetails(page, "Jensen Huang");
+  await page.getByRole("button", { name: "Block Jensen Huang" }).click();
+  const dialog = page.getByRole("dialog", { name: "Block Jensen Huang?" });
   await expect(dialog).toBeVisible();
   // Cancel keeps things as they were.
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("button", { name: "Block Maya Okafor" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Block Jensen Huang" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Block Maya Okafor" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Block Maya" }).click();
-  await expect(page.getByRole("button", { name: "Unblock Maya Okafor" })).toBeVisible();
-  await expect(row(page, "Maya Okafor")).toContainText("Blocked");
+  await page.getByRole("button", { name: "Block Jensen Huang" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Block Jensen" }).click();
+  await expect(page.getByRole("button", { name: "Unblock Jensen Huang" })).toBeVisible();
+  await expect(row(page, "Jensen Huang")).toContainText("Blocked");
 
   await page.getByRole("button", { name: "Back to chat" }).click();
-  await expect(page.getByText(/You blocked Maya/)).toBeVisible();
+  await expect(page.getByText(/You blocked Jensen/)).toBeVisible();
   await expect(composer(page)).toHaveCount(0);
 
   await page.getByRole("button", { name: "Contact details", exact: true }).click();
-  await page.getByRole("button", { name: "Unblock Maya Okafor" }).click();
+  await page.getByRole("button", { name: "Unblock Jensen Huang" }).click();
   await page.getByRole("button", { name: "Back to chat" }).click();
   await expect(composer(page)).toBeVisible();
 });
 
 test("Escape closes a confirmation without doing anything", async ({ page }) => {
   await openDemo(page, "populated");
-  await openDetails(page, "Maya Okafor");
+  await openDetails(page, "Jensen Huang");
   await page.getByRole("button", { name: "Remove contact" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(row(page, "Maya Okafor")).toBeVisible();
+  await expect(row(page, "Jensen Huang")).toBeVisible();
 });
 
 test("clear conversation asks first, then empties the chat", async ({ page }) => {
   await openDemo(page, "populated");
-  await openDetails(page, "Maya Okafor");
+  await openDetails(page, "Jensen Huang");
   await page.getByRole("button", { name: "Clear conversation" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Clear conversation" }).click();
   await page.getByRole("button", { name: "Back to chat" }).click();
@@ -66,11 +66,11 @@ test("clear conversation asks first, then empties the chat", async ({ page }) =>
 
 test("remove contact asks first, then removes it and returns to the list", async ({ page }) => {
   await openDemo(page, "populated");
-  await openDetails(page, "Maya Okafor");
+  await openDetails(page, "Jensen Huang");
   await page.getByRole("button", { name: "Remove contact" }).click();
-  const dialog = page.getByRole("dialog", { name: "Remove Maya Okafor?" });
-  await expect(dialog).toContainText("Deletes Maya Okafor and your conversation from this browser.");
+  const dialog = page.getByRole("dialog", { name: "Remove Jensen Huang?" });
+  await expect(dialog).toContainText("Deletes Jensen Huang and your conversation from this browser.");
   await dialog.getByRole("button", { name: "Remove contact" }).click();
-  await expect(row(page, "Maya Okafor")).toHaveCount(0);
+  await expect(row(page, "Jensen Huang")).toHaveCount(0);
   await expect(page.locator(".chat")).toHaveCount(0);
 });

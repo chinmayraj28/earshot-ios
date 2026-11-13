@@ -21,7 +21,7 @@ export type DemoScenario = "populated" | "empty" | "firstRun";
 export type DemoFindOutcome =
   /** A new phone whose person accepts. */
   | "newContact"
-  /** Re-links the out-of-range saved contact (Jonas in "populated"); his waiting messages go out. */
+  /** Re-links the out-of-range saved contact (Alice in "populated"); his waiting messages go out. */
   | "savedContact"
   /** A new phone whose person never accepts: the request fails with "noAnswer". */
   | "declined"
@@ -101,18 +101,18 @@ export class DemoEngine extends EngineState {
     this.profile = { displayName: "Chinmay", hasCompletedOnboarding: true };
     if (scenario === "empty") return;
     const now = this.now();
-    this.#addSeeded(10, "Maya Okafor", "connected", { verified: true }, now, [
+    this.#addSeeded(10, "Jensen Huang", "connected", { verified: true }, now, [
       ["in", "Train's stuck in the tunnel. Zero bars.", 34],
       ["out", "Same in carriage 4. Are you near the front?", 33],
       ["in", "Carriage 2. They say twenty minutes.", 31],
       ["out", "OK. Meet on the platform by the stairs when we get in?", 30],
       ["in", "Deal. I'll wait by the stairs.", 29],
     ]);
-    this.#addSeeded(11, "Jonas Weber", "outOfRange", {}, now, [
+    this.#addSeeded(11, "Alice Huang", "outOfRange", {}, now, [
       ["in", "I'm at the food trucks near the main stage.", 26 * 60],
       ["out", "Which truck are you at?", 25 * 60, "waiting"],
     ]);
-    this.#addSeeded(12, "Elena Costa", "connected", { unread: 2 }, now, [
+    this.#addSeeded(12, "Aubrey Graham", "connected", { unread: 2 }, now, [
       ["in", "Are you still in the building?", 8],
       ["in", "Doors on the east side are open now.", 6],
     ]);
