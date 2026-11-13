@@ -83,7 +83,10 @@ struct Composer: View {
                 TextField(hasPhoto ? "Add a caption" : placeholder, text: $draft, axis: .vertical)
                     .font(.body)
                     .foregroundStyle(Palette.ink)
-                    .lineLimit(1...5)
+                    // An empty field is always one line. Without this, iOS can lay an empty vertical
+                    // field out taller than one line when the accessibility system inspects it
+                    // (seen during Xcode's accessibility audit: 26 pt → 75 pt, shifting the whole chat).
+                    .lineLimit(draft.isEmpty ? 1...1 : 1...5)
                     .focused(focused)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)

@@ -25,7 +25,6 @@ final class AccessibilityAuditTests: XCTestCase {
 
         app.buttons["conversation.Maya Okafor"].tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat.composer").firstMatch.waitForExistence(timeout: 10))
-        sleep(2) // let the push and the transcript settle; mid-animation text reads as low contrast
         try audit(app, "Chat")
 
         app.buttons["chat.details"].tap()
@@ -51,8 +50,23 @@ final class AccessibilityAuditTests: XCTestCase {
     @MainActor
     private func audit(_ app: XCUIApplication, _ screen: String) throws {
         let types: XCUIAccessibilityAuditType = [.contrast, .hitRegion, .sufficientElementDescription, .textClipped, .trait]
+        // What was on screen when the audit started, for diagnosing any failure.
+        let before = XCTAttachment(screenshot: app.screenshot())
+        before.name = "audit-\(screen)-start"
+        before.lifetime = .deleteOnSuccess
+        add(before)
+        var index = 0
         try app.performAccessibilityAudit(for: types) { issue in
-            print("AUDIT [\(screen)] \(issue.auditType) – \(issue.compactDescription) – \(issue.element?.debugDescription.prefix(160) ?? "no element")")
+            index += 1
+            let element = issue.element
+            let label = element?.label ?? "<no element>"
+            let frame = element.map { "\($0.frame)" } ?? "-"
+            let identifier = element?.identifier ?? ""
+            print("AUDIT [\(screen)] #\(index) type=\(issue.auditType.rawValue) \(issue.compactDescription) | label=\"\(label)\" id=\"\(identifier)\" frame=\(frame) | \(issue.detailedDescription)")
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "audit-\(screen)-issue-\(index)"
+            shot.lifetime = .keepAlways
+            self.add(shot)
             return false
         }
     }
